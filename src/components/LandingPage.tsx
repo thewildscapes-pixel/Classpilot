@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User } from '../types';
+import { User, Faculty } from '../types';
 import { DEPARTMENTS_LIST } from '../utils/timeUtils';
 import { signInWithGoogleFirebase } from '../lib/firebaseService';
 import { ClassPilotLogo } from './ClassPilotLogo';

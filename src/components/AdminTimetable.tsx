@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User } from '../types';
+import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User, RoutineVersion, RoutineBackup } from '../types';
 import { AdminNaacReports } from './AdminNaacReports';
 import {
   DAYS_OF_WEEK,
@@ -19,6 +19,7 @@ import {
   FileSpreadsheet,
   Download,
   Plus,
+  PlusCircle,
   Trash2,
   Edit2,
   AlertTriangle,
@@ -37,6 +38,12 @@ import {
   Clock,
   BookOpen,
   Users,
+  History,
+  HardDrive,
+  RefreshCw,
+  FileCode,
+  Database,
+  Eye,
 } from 'lucide-react';
 
 interface AdminTimetableProps {
@@ -45,11 +52,19 @@ interface AdminTimetableProps {
   facultyList: Faculty[];
   roomList: Room[];
   students?: Student[];
+  routineVersions?: RoutineVersion[];
+  routineBackups?: RoutineBackup[];
   onUpdateStudents?: (students: Student[]) => void;
   onAddEntry: (entry: Partial<TimetableEntry>) => void;
   onUpdateEntry: (id: string, entry: Partial<TimetableEntry>) => void;
   onDeleteEntry: (id: string) => void;
-  onBulkImport: (entries: Partial<TimetableEntry>[], replaceExisting: boolean) => void;
+  onBulkImport: (
+    entries: Partial<TimetableEntry>[],
+    replaceExisting: boolean,
+    rawFileData?: { fileName: string; contentBase64?: string; fileSizeBytes?: number }
+  ) => Promise<{ success: boolean; count?: number; error?: string }> | void;
+  onRollbackRoutine?: (entriesSnapshot: TimetableEntry[], versionLabel: string) => Promise<void> | void;
+  onCreateManualBackup?: (description: string) => Promise<void> | void;
   onAddFaculty: (faculty: Partial<Faculty>) => void;
   onAddRoom: (room: Partial<Room>) => void;
   onResetData: () => void;
@@ -62,18 +77,37 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   facultyList,
   roomList,
   students = [],
+  routineVersions = [],
+  routineBackups = [],
   onUpdateStudents,
   onAddEntry,
   onUpdateEntry,
   onDeleteEntry,
   onBulkImport,
+  onRollbackRoutine,
+  onCreateManualBackup,
   onAddFaculty,
   onAddRoom,
   onResetData,
   onToggleUserAdminRole,
 }) => {
   // Navigation sub-tabs inside Admin
-  const [activeAdminTab, setActiveAdminTab] = useState<'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access'>('grid');
+  const [activeAdminTab, setActiveAdminTab] = useState<
+    'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access' | 'backup_safeguards'
+  >('grid');
+
+  // Raw Uploaded File Retention State
+  const [uploadedRawFileData, setUploadedRawFileData] = useState<{
+    fileName: string;
+    contentBase64?: string;
+    fileSizeBytes?: number;
+  } | null>(null);
+
+  // Version / Backup Preview Modal State
+  const [previewingSnapshot, setPreviewingSnapshot] = useState<{
+    title: string;
+    entries: TimetableEntry[];
+  } | null>(null);
 
   // Semester Cycle & Academic Session State
   const [activeSemesterCycle, setActiveSemesterCycle] = useState<'Odd' | 'Even'>('Odd');
@@ -431,14 +465,62 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   );
   const selectedDeptClassCount = filteredList.length;
 
-  // Handle Excel/CSV File Upload
+  // Export Current Live Routine Database as Excel File
+  const handleExportLiveRoutineExcel = (dataToExport?: TimetableEntry[], customFileName?: string) => {
+    const list = dataToExport || timetable;
+    if (!list || list.length === 0) {
+      alert('No routine entries found in the database to export.');
+      return;
+    }
+
+    const exportRows = list.map((item, index) => ({
+      'SL No': index + 1,
+      'Day': item.day,
+      'Start Time': item.startTime,
+      'End Time': item.endTime,
+      'Faculty Name': item.facultyName,
+      'Faculty ID': item.facultyId,
+      'Subject Code': item.subjectCode,
+      'Subject Name': item.subjectName,
+      'Paper Category': item.paperCategory || 'Major',
+      'Room': item.room,
+      'Batch': item.batch,
+      'Department': item.department,
+      'Semester Cycle': item.semesterCycle || activeSemesterCycle,
+      'Program / Semester': item.programSemester || 'FYUGP',
+      'Notes': item.notes || '',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Routine Database');
+
+    const fileName = customFileName || `Digboi_College_Live_Routine_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  // Handle Excel/CSV File Upload with Raw File Base64 Retention
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setImportFileName(file.name);
-    const reader = new FileReader();
 
+    // Read file for Base64 retention in Firestore
+    const base64Reader = new FileReader();
+    base64Reader.onload = (bEvt) => {
+      const resStr = bEvt.target?.result as string;
+      const base64Content = resStr.includes(',') ? resStr.split(',')[1] : resStr;
+      setUploadedRawFileData({
+        fileName: file.name,
+        contentBase64: base64Content,
+        fileSizeBytes: file.size,
+      });
+    };
+    base64Reader.readAsDataURL(file);
+
+    // Read file as binary string for XLSX parsing
+    const reader = new FileReader();
     reader.onload = (evt) => {
       try {
         const bstr = evt.target?.result;
@@ -518,12 +600,25 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     );
   };
 
-  const handleConfirmImport = () => {
+  const handleConfirmImport = async () => {
     if (parsedPreviewEntries.length === 0) return;
-    onBulkImport(parsedPreviewEntries, replaceMode);
+    const result = await onBulkImport(
+      parsedPreviewEntries,
+      replaceMode,
+      uploadedRawFileData || undefined
+    );
+    if (result && typeof result === 'object' && result.success === false) {
+      alert(
+        `❌ Routine Database Write Failed: ${result.error || 'Could not save routine to database.'}\n\n` +
+        `Your uploaded entries and preview form have NOT been reset. You can try again once connectivity/permissions are verified.`
+      );
+      return; // Do NOT reset form state on write failure
+    }
+    alert(`✅ Routine Uploaded & Persisted to Firestore Database!\n\n${parsedPreviewEntries.length} class periods saved. Version history log and raw file retained.`);
     handleNotifyFacultyRoutineUpload(parsedPreviewEntries);
     setParsedPreviewEntries([]);
     setImportFileName('');
+    setUploadedRawFileData(null);
     setActiveAdminTab('grid');
   };
 
@@ -787,6 +882,18 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             >
               <RotateCcw className="w-3.5 h-3.5 text-amber-300" />
               <span>Session & Archival</span>
+            </button>
+
+            <button
+              onClick={() => setActiveAdminTab('backup_safeguards')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeAdminTab === 'backup_safeguards'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-emerald-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Backups & Recovery</span>
             </button>
 
             {isSuperAdmin && (
@@ -1059,6 +1166,313 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== TAB: DATA BACKUP & RECOVERY SAFEGUARDS ===================== */}
+      {activeAdminTab === 'backup_safeguards' && (
+        <div className="space-y-6">
+          {/* Header Card & Quick Action Controls */}
+          <div className="bg-slate-800/90 rounded-2xl p-6 border border-emerald-500/40 space-y-4 shadow-xl">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2 text-emerald-400">
+                  <Shield className="w-6 h-6" />
+                  <h3 className="font-heading font-bold text-xl text-white">
+                    Data Backup, Version History & Recovery Safeguards
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Automated backups, direct Excel routine exports, raw spreadsheet retention, and version history rollback system to safeguard academic routine integrity.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleExportLiveRoutineExcel()}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Live Routine (.xlsx)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    const desc = prompt(
+                      'Enter a label or description for this manual backup snapshot:',
+                      'Manual Pre-Exam Schedule Snapshot'
+                    );
+                    if (desc && onCreateManualBackup) {
+                      onCreateManualBackup(desc);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-2 cursor-pointer"
+                >
+                  <HardDrive className="w-4 h-4 text-cyan-200" />
+                  <span>Create Instant Backup</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Status Bar */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Live Database Entries</div>
+                <div className="text-lg font-mono font-extrabold text-emerald-400">{timetable.length} Classes</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Upload Version History</div>
+                <div className="text-lg font-mono font-extrabold text-blue-400">{routineVersions.length} Logs</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">System Backups Archived</div>
+                <div className="text-lg font-mono font-extrabold text-cyan-400">{routineBackups.length} Snapshots</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Automated Daily Backups</div>
+                <div className="text-lg font-mono font-extrabold text-amber-400">
+                  {routineBackups.filter((b) => b.type === 'automated_daily').length} Scheduled
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION A: UPLOAD VERSION HISTORY & 1-CLICK ROLLBACK */}
+          <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <History className="w-5 h-5 text-indigo-400" />
+                <h4 className="font-heading font-extrabold text-lg text-white">
+                  Upload Version History & Rollback Logs
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400">
+                Retains upload history to protect against accidental overwrites
+              </span>
+            </div>
+
+            {routineVersions.length === 0 ? (
+              <div className="bg-slate-900/50 border border-slate-700/80 rounded-xl p-8 text-center space-y-2">
+                <FileCode className="w-10 h-10 text-slate-500 mx-auto" />
+                <p className="text-xs text-slate-300 font-medium">No routine upload history recorded yet.</p>
+                <p className="text-[11px] text-slate-500">
+                  Future Excel or CSV routine uploads will automatically generate version logs with raw file retention.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-700">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
+                    <tr>
+                      <th className="p-3">Upload Timestamp</th>
+                      <th className="p-3">Uploaded By</th>
+                      <th className="p-3">File Name</th>
+                      <th className="p-3">Mode</th>
+                      <th className="p-3">Classes</th>
+                      <th className="p-3">Change Details</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60">
+                    {routineVersions.map((ver) => (
+                      <tr key={ver.id} className="hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-white whitespace-nowrap">
+                          {new Date(ver.timestamp).toLocaleString()}
+                        </td>
+                        <td className="p-3 font-semibold text-slate-300">{ver.uploadedBy}</td>
+                        <td className="p-3 font-medium text-cyan-300 max-w-[180px] truncate" title={ver.fileName}>
+                          {ver.fileName}
+                        </td>
+                        <td className="p-3">
+                          {ver.mode === 'replace' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              Replace
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              Append
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-emerald-400">{ver.totalRecords}</td>
+                        <td className="p-3 text-slate-400 max-w-[220px] truncate" title={ver.changeSummary}>
+                          {ver.changeSummary}
+                        </td>
+                        <td className="p-3 text-right whitespace-nowrap space-x-1.5">
+                          {ver.entriesSnapshot && ver.entriesSnapshot.length > 0 && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setPreviewingSnapshot({
+                                    title: `Version Log (${new Date(ver.timestamp).toLocaleString()}) - ${ver.fileName}`,
+                                    entries: ver.entriesSnapshot || [],
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                title="Inspect Version Entries"
+                              >
+                                <Eye className="w-3 h-3 text-blue-400" />
+                                <span>Preview</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  handleExportLiveRoutineExcel(
+                                    ver.entriesSnapshot,
+                                    `Version_Export_${ver.fileName}_${new Date(ver.timestamp).toISOString().split('T')[0]}.xlsx`
+                                  )
+                                }
+                                className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 text-[11px] font-bold rounded-lg border border-emerald-700/50 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                title="Export Version to Excel"
+                              >
+                                <Download className="w-3 h-3 text-emerald-400" />
+                                <span>Export</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `⚠️ Confirm Routine Rollback?\n\nAre you sure you want to restore the live routine database back to the state in version "${ver.fileName}" from ${new Date(ver.timestamp).toLocaleString()}?\n\nThis will restore ${ver.entriesSnapshot?.length} class schedules into the live database.`
+                                    )
+                                  ) {
+                                    if (onRollbackRoutine && ver.entriesSnapshot) {
+                                      onRollbackRoutine(ver.entriesSnapshot, ver.fileName);
+                                    }
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white text-[11px] font-bold rounded-lg border border-rose-500/40 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                title="Restore Live Database to this version"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>Rollback</span>
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION B: AUTOMATED DAILY & MANUAL BACKUP SNAPSHOTS */}
+          <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Database className="w-5 h-5 text-cyan-400" />
+                <h4 className="font-heading font-extrabold text-lg text-white">
+                  Automated Daily & Manual System Backups
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400">
+                Scheduled automated daily snapshots & safety pre-import backups
+              </span>
+            </div>
+
+            {routineBackups.length === 0 ? (
+              <div className="bg-slate-900/50 border border-slate-700/80 rounded-xl p-8 text-center space-y-2">
+                <HardDrive className="w-10 h-10 text-slate-500 mx-auto" />
+                <p className="text-xs text-slate-300 font-medium">No backup snapshots archived yet.</p>
+                <p className="text-[11px] text-slate-500">
+                  Automated daily backups run automatically when routine entries exist.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-700">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
+                    <tr>
+                      <th className="p-3">Backup Date & Time</th>
+                      <th className="p-3">Type</th>
+                      <th className="p-3">Description</th>
+                      <th className="p-3">Classes</th>
+                      <th className="p-3 text-right">Recovery Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60">
+                    {routineBackups.map((bkp) => (
+                      <tr key={bkp.id} className="hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-white whitespace-nowrap">
+                          {new Date(bkp.timestamp).toLocaleString()}
+                        </td>
+                        <td className="p-3">
+                          {bkp.type === 'automated_daily' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              Automated Daily
+                            </span>
+                          ) : bkp.type === 'pre_import_backup' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              Pre-Import Safety
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                              Manual Snapshot
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-slate-300 font-medium max-w-[260px] truncate" title={bkp.description}>
+                          {bkp.description}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-cyan-300">{bkp.totalClasses}</td>
+                        <td className="p-3 text-right whitespace-nowrap space-x-1.5">
+                          {bkp.entriesSnapshot && bkp.entriesSnapshot.length > 0 && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setPreviewingSnapshot({
+                                    title: `Backup Snapshot (${new Date(bkp.timestamp).toLocaleString()}) - ${bkp.description}`,
+                                    entries: bkp.entriesSnapshot || [],
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-all cursor-pointer inline-flex items-center space-x-1"
+                              >
+                                <Eye className="w-3 h-3 text-blue-400" />
+                                <span>Preview</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  handleExportLiveRoutineExcel(
+                                    bkp.entriesSnapshot,
+                                    `Backup_Export_${bkp.id}_${new Date(bkp.timestamp).toISOString().split('T')[0]}.xlsx`
+                                  )
+                                }
+                                className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 text-[11px] font-bold rounded-lg border border-emerald-700/50 transition-all cursor-pointer inline-flex items-center space-x-1"
+                              >
+                                <Download className="w-3 h-3 text-emerald-400" />
+                                <span>Export</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `⚠️ Restore System Routine from Backup?\n\nThis will restore ${bkp.entriesSnapshot?.length} class schedules from backup snapshot "${bkp.description}" (${new Date(bkp.timestamp).toLocaleString()}) into the live database.`
+                                    )
+                                  ) {
+                                    if (onRollbackRoutine && bkp.entriesSnapshot) {
+                                      onRollbackRoutine(bkp.entriesSnapshot, bkp.description);
+                                    }
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg shadow transition-all cursor-pointer inline-flex items-center space-x-1"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Restore</span>
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2167,6 +2581,378 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== TAB: DATA BACKUP & RECOVERY SAFEGUARDS ===================== */}
+      {activeAdminTab === 'backup_safeguards' && (
+        <div className="space-y-6">
+          {/* Header Card & Quick Action Controls */}
+          <div className="bg-slate-800/90 rounded-2xl p-6 border border-emerald-500/40 space-y-4 shadow-xl">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2 text-emerald-400">
+                  <Shield className="w-6 h-6" />
+                  <h3 className="font-heading font-bold text-xl text-white">
+                    Data Backup, Version History & Recovery Safeguards
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Automated backups, direct Excel routine exports, raw spreadsheet retention, and version history rollback system to safeguard academic routine integrity.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleExportLiveRoutineExcel()}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Live Routine (.xlsx)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    const desc = prompt(
+                      'Enter a label or description for this manual backup snapshot:',
+                      'Manual Pre-Exam Schedule Snapshot'
+                    );
+                    if (desc && onCreateManualBackup) {
+                      onCreateManualBackup(desc);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-2 cursor-pointer"
+                >
+                  <HardDrive className="w-4 h-4 text-cyan-200" />
+                  <span>Create Instant Backup</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Status Bar */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Live Database Entries</div>
+                <div className="text-lg font-mono font-extrabold text-emerald-400">{timetable.length} Classes</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Upload Version History</div>
+                <div className="text-lg font-mono font-extrabold text-blue-400">{routineVersions.length} Logs</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">System Backups Archived</div>
+                <div className="text-lg font-mono font-extrabold text-cyan-400">{routineBackups.length} Snapshots</div>
+              </div>
+              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-700/70">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Automated Daily Backups</div>
+                <div className="text-lg font-mono font-extrabold text-amber-400">
+                  {routineBackups.filter((b) => b.type === 'automated_daily').length} Scheduled
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION A: UPLOAD VERSION HISTORY & 1-CLICK ROLLBACK */}
+          <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <History className="w-5 h-5 text-indigo-400" />
+                <h4 className="font-heading font-extrabold text-lg text-white">
+                  Upload Version History & Rollback Logs
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400">
+                Retains upload history to protect against accidental overwrites
+              </span>
+            </div>
+
+            {routineVersions.length === 0 ? (
+              <div className="bg-slate-900/50 border border-slate-700/80 rounded-xl p-8 text-center space-y-2">
+                <FileCode className="w-10 h-10 text-slate-500 mx-auto" />
+                <p className="text-xs text-slate-300 font-medium">No routine upload history recorded yet.</p>
+                <p className="text-[11px] text-slate-500">
+                  Future Excel or CSV routine uploads will automatically generate version logs with raw file retention.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-700">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
+                    <tr>
+                      <th className="p-3">Upload Timestamp</th>
+                      <th className="p-3">Uploaded By</th>
+                      <th className="p-3">File Name</th>
+                      <th className="p-3">Mode</th>
+                      <th className="p-3">Classes</th>
+                      <th className="p-3">Change Details</th>
+                      <th className="p-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60">
+                    {routineVersions.map((ver) => (
+                      <tr key={ver.id} className="hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-white whitespace-nowrap">
+                          {new Date(ver.timestamp).toLocaleString()}
+                        </td>
+                        <td className="p-3 font-semibold text-slate-300">{ver.uploadedBy}</td>
+                        <td className="p-3 font-medium text-cyan-300 max-w-[180px] truncate" title={ver.fileName}>
+                          {ver.fileName}
+                        </td>
+                        <td className="p-3">
+                          {ver.mode === 'replace' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              Replace
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              Append
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-emerald-400">{ver.totalRecords}</td>
+                        <td className="p-3 text-slate-400 max-w-[220px] truncate" title={ver.changeSummary}>
+                          {ver.changeSummary}
+                        </td>
+                        <td className="p-3 text-right whitespace-nowrap space-x-1.5">
+                          {ver.entriesSnapshot && ver.entriesSnapshot.length > 0 && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setPreviewingSnapshot({
+                                    title: `Version Log (${new Date(ver.timestamp).toLocaleString()}) - ${ver.fileName}`,
+                                    entries: ver.entriesSnapshot || [],
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                title="Inspect Version Entries"
+                              >
+                                <Eye className="w-3 h-3 text-blue-400" />
+                                <span>Preview</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  handleExportLiveRoutineExcel(
+                                    ver.entriesSnapshot,
+                                    `Version_Export_${ver.fileName}_${new Date(ver.timestamp).toISOString().split('T')[0]}.xlsx`
+                                  )
+                                }
+                                className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 text-[11px] font-bold rounded-lg border border-emerald-700/50 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                title="Export Version to Excel"
+                              >
+                                <Download className="w-3 h-3 text-emerald-400" />
+                                <span>Export</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `⚠️ Confirm Routine Rollback?\n\nAre you sure you want to restore the live routine database back to the state in version "${ver.fileName}" from ${new Date(ver.timestamp).toLocaleString()}?\n\nThis will restore ${ver.entriesSnapshot?.length} class schedules into the live database.`
+                                    )
+                                  ) {
+                                    if (onRollbackRoutine && ver.entriesSnapshot) {
+                                      onRollbackRoutine(ver.entriesSnapshot, ver.fileName);
+                                    }
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white text-[11px] font-bold rounded-lg border border-rose-500/40 transition-all cursor-pointer inline-flex items-center space-x-1"
+                                title="Restore Live Database to this version"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>Rollback</span>
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* SECTION B: AUTOMATED DAILY & MANUAL BACKUP SNAPSHOTS */}
+          <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-6 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Database className="w-5 h-5 text-cyan-400" />
+                <h4 className="font-heading font-extrabold text-lg text-white">
+                  Automated Daily & Manual System Backups
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400">
+                Scheduled automated daily snapshots & safety pre-import backups
+              </span>
+            </div>
+
+            {routineBackups.length === 0 ? (
+              <div className="bg-slate-900/50 border border-slate-700/80 rounded-xl p-8 text-center space-y-2">
+                <HardDrive className="w-10 h-10 text-slate-500 mx-auto" />
+                <p className="text-xs text-slate-300 font-medium">No backup snapshots archived yet.</p>
+                <p className="text-[11px] text-slate-500">
+                  Automated daily backups run automatically when routine entries exist.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-700">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
+                    <tr>
+                      <th className="p-3">Backup Date & Time</th>
+                      <th className="p-3">Type</th>
+                      <th className="p-3">Description</th>
+                      <th className="p-3">Classes</th>
+                      <th className="p-3 text-right">Recovery Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700/60">
+                    {routineBackups.map((bkp) => (
+                      <tr key={bkp.id} className="hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-mono font-bold text-white whitespace-nowrap">
+                          {new Date(bkp.timestamp).toLocaleString()}
+                        </td>
+                        <td className="p-3">
+                          {bkp.type === 'automated_daily' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              Automated Daily
+                            </span>
+                          ) : bkp.type === 'pre_import_backup' ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              Pre-Import Safety
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                              Manual Snapshot
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-slate-300 font-medium max-w-[260px] truncate" title={bkp.description}>
+                          {bkp.description}
+                        </td>
+                        <td className="p-3 font-mono font-bold text-cyan-300">{bkp.totalClasses}</td>
+                        <td className="p-3 text-right whitespace-nowrap space-x-1.5">
+                          {bkp.entriesSnapshot && bkp.entriesSnapshot.length > 0 && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  setPreviewingSnapshot({
+                                    title: `Backup Snapshot (${new Date(bkp.timestamp).toLocaleString()}) - ${bkp.description}`,
+                                    entries: bkp.entriesSnapshot || [],
+                                  })
+                                }
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-all cursor-pointer inline-flex items-center space-x-1"
+                              >
+                                <Eye className="w-3 h-3 text-blue-400" />
+                                <span>Preview</span>
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  handleExportLiveRoutineExcel(
+                                    bkp.entriesSnapshot,
+                                    `Backup_Export_${bkp.id}_${new Date(bkp.timestamp).toISOString().split('T')[0]}.xlsx`
+                                  )
+                                }
+                                className="px-2.5 py-1 bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 text-[11px] font-bold rounded-lg border border-emerald-700/50 transition-all cursor-pointer inline-flex items-center space-x-1"
+                              >
+                                <Download className="w-3 h-3 text-emerald-400" />
+                                <span>Export</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  if (
+                                    confirm(
+                                      `⚠️ Restore System Routine from Backup?\n\nThis will restore ${bkp.entriesSnapshot?.length} class schedules from backup snapshot "${bkp.description}" (${new Date(bkp.timestamp).toLocaleString()}) into the live database.`
+                                    )
+                                  ) {
+                                    if (onRollbackRoutine && bkp.entriesSnapshot) {
+                                      onRollbackRoutine(bkp.entriesSnapshot, bkp.description);
+                                    }
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold rounded-lg shadow transition-all cursor-pointer inline-flex items-center space-x-1"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Restore</span>
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Snapshot / Version Preview Modal */}
+      {previewingSnapshot && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl space-y-4 p-6 text-white overflow-hidden">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2 text-cyan-400">
+                <Eye className="w-5 h-5" />
+                <h3 className="font-heading font-bold text-lg text-white truncate max-w-xl">
+                  {previewingSnapshot.title}
+                </h3>
+              </div>
+              <button
+                onClick={() => setPreviewingSnapshot(null)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto rounded-xl border border-slate-800">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 font-bold sticky top-0">
+                  <tr>
+                    <th className="p-2.5">Day</th>
+                    <th className="p-2.5">Time</th>
+                    <th className="p-2.5">Faculty</th>
+                    <th className="p-2.5">Subject</th>
+                    <th className="p-2.5">Room</th>
+                    <th className="p-2.5">Batch</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {previewingSnapshot.entries.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-800/40">
+                      <td className="p-2.5 font-semibold text-white">{item.day}</td>
+                      <td className="p-2.5 font-mono text-indigo-300">
+                        {item.startTime} - {item.endTime}
+                      </td>
+                      <td className="p-2.5 text-slate-200">{item.facultyName}</td>
+                      <td className="p-2.5 font-bold text-white">
+                        {item.subjectName} ({item.subjectCode})
+                      </td>
+                      <td className="p-2.5 text-cyan-300">{item.room}</td>
+                      <td className="p-2.5">{item.batch}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-slate-400 font-mono">
+                Total Classes: {previewingSnapshot.entries.length}
+              </span>
+              <button
+                onClick={() => setPreviewingSnapshot(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl"
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}

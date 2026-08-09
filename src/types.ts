@@ -218,3 +218,34 @@ export interface ImportPreviewItem {
   isValid: boolean;
   errorReason?: string;
 }
+
+export interface RoutineVersion {
+  id: string;
+  timestamp: string;
+  uploadedBy: string;
+  fileName: string;
+  totalRecords: number;
+  mode: 'replace' | 'append';
+  changeSummary: string;
+  rawFileId?: string;
+  rawFileName?: string;
+  entriesSnapshot: TimetableEntry[];
+}
+
+export interface RoutineBackup {
+  id: string;
+  timestamp: string;
+  type: 'automated_daily' | 'manual_snapshot' | 'pre_import_backup';
+  description: string;
+  totalClasses: number;
+  entriesSnapshot: TimetableEntry[];
+}
+
+export interface RawRoutineFile {
+  id: string;
+  fileName: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  fileSizeBytes: number;
+  contentBase64?: string;
+}

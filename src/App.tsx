@@ -8,6 +8,9 @@ import {
   DayOfWeek,
   AlertNotification,
   ScheduleConflict,
+  RoutineVersion,
+  RoutineBackup,
+  RawRoutineFile,
 } from './types';
 import {
   INITIAL_FACULTY,
@@ -25,9 +28,24 @@ import {
 import { playAlertChime, playSchoolBellSound, stopSchoolBellSound } from './utils/audioUtils';
 import {
   subscribeToTimetableRealtime,
+  saveTimetableToFirestore,
+  addTimetableEntryToFirestore,
+  updateTimetableEntryInFirestore,
+  deleteTimetableEntryFromFirestore,
   saveUserProfileInFirestore,
   listenToAuthChanges,
   firebaseSignOut,
+  subscribeToRoutineVersionsRealtime,
+  subscribeToRoutineBackupsRealtime,
+  recordRoutineVersionInFirestore,
+  saveRawRoutineFileToFirestore,
+  createRoutineBackupInFirestore,
+  checkAndTriggerAutomatedDailyBackup,
+  rollbackRoutineToSnapshot,
+  subscribeToFacultyRealtime,
+  saveFacultyToFirestore,
+  subscribeToRoomsRealtime,
+  saveRoomToFirestore,
 } from './lib/firebaseService';
 
 // Components
@@ -53,8 +71,27 @@ import { Bell, Clock, Trash2, MapPin, CheckCircle, Volume2, Shield } from 'lucid
 
 export default function App() {
   // --- STATE MANAGEMENT ---
-  const [facultyList, setFacultyList] = useState<Faculty[]>(INITIAL_FACULTY);
-  const [roomList, setRoomList] = useState<Room[]>(INITIAL_ROOMS);
+  const [facultyList, setFacultyList] = useState<Faculty[]>(() => {
+    try {
+      const saved = localStorage.getItem('classpilot_faculty_list');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return INITIAL_FACULTY;
+  });
+
+  const [roomList, setRoomList] = useState<Room[]>(() => {
+    try {
+      const saved = localStorage.getItem('classpilot_room_list');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return INITIAL_ROOMS;
+  });
   const [timetable, setTimetable] = useState<TimetableEntry[]>(INITIAL_TIMETABLE);
   const [students, setStudents] = useState<Student[]>(() => {
     try {
@@ -171,12 +208,47 @@ export default function App() {
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<unknown>(null);
   const [selectedClassForDiary, setSelectedClassForDiary] = useState<TimetableEntry | null>(null);
 
+  // Safeguards: Versioning & Backups State
+  const [routineVersions, setRoutineVersions] = useState<RoutineVersion[]>([]);
+  const [routineBackups, setRoutineBackups] = useState<RoutineBackup[]>([]);
+
   // --- FETCH BACKEND DATA ON MOUNT & REALTIME FIRESTORE TIMETABLE ---
   useEffect(() => {
     // Firestore Real-Time Timetable Listener (no manual refresh needed)
     const unsubscribeTimetable = subscribeToTimetableRealtime((entries) => {
       if (entries && entries.length > 0) {
         setTimetable(entries);
+        checkAndTriggerAutomatedDailyBackup(entries).catch((err) =>
+          console.warn('Auto backup trigger notice:', err)
+        );
+      }
+    });
+
+    // Firestore Real-Time Routine Versions & Backups Listeners
+    const unsubscribeVersions = subscribeToRoutineVersionsRealtime((versions) => {
+      setRoutineVersions(versions);
+    });
+
+    const unsubscribeBackups = subscribeToRoutineBackupsRealtime((backups) => {
+      setRoutineBackups(backups);
+    });
+
+    // Firestore Real-Time Faculty & Room Listeners
+    const unsubscribeFaculty = subscribeToFacultyRealtime(INITIAL_FACULTY, (list) => {
+      if (list && list.length > 0) {
+        setFacultyList(list);
+        try {
+          localStorage.setItem('classpilot_faculty_list', JSON.stringify(list));
+        } catch (e) {}
+      }
+    });
+
+    const unsubscribeRooms = subscribeToRoomsRealtime(INITIAL_ROOMS, (list) => {
+      if (list && list.length > 0) {
+        setRoomList(list);
+        try {
+          localStorage.setItem('classpilot_room_list', JSON.stringify(list));
+        } catch (e) {}
       }
     });
 
@@ -373,35 +445,28 @@ export default function App() {
 
   // --- CRUD API HANDLERS ---
   const handleAddEntry = async (entryData: Partial<TimetableEntry>) => {
+    const fsResult = await addTimetableEntryToFirestore(entryData);
+    if (fsResult.success && fsResult.entry) {
+      setTimetable((prev) => [...prev, fsResult.entry!]);
+    } else {
+      console.warn('Firestore add entry error:', fsResult.error);
+    }
+
     try {
-      const res = await fetch('/api/timetable', {
+      await fetch('/api/timetable', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entryData),
       });
-      const newEntry = await res.json();
-      setTimetable((prev) => [...prev, newEntry]);
     } catch (err) {
       console.error('Failed to add entry via API:', err);
-      // Fallback local update
-      const fallback: TimetableEntry = {
-        id: `tt_${Date.now()}`,
-        facultyId: entryData.facultyId || 'fac_1',
-        facultyName: entryData.facultyName || 'Dr. Deborshee Gogoi',
-        subjectCode: entryData.subjectCode || 'CS101',
-        subjectName: entryData.subjectName || 'New Class',
-        room: entryData.room || 'Room No. C1',
-        day: entryData.day || 'Monday',
-        startTime: entryData.startTime || '09:00',
-        endTime: entryData.endTime || '10:15',
-        batch: entryData.batch || 'CS-1A',
-        department: entryData.department || 'Computer Science',
-      };
-      setTimetable((prev) => [...prev, fallback]);
     }
   };
 
   const handleUpdateEntry = async (id: string, entryData: Partial<TimetableEntry>) => {
+    setTimetable((prev) => prev.map((t) => (t.id === id ? { ...t, ...entryData } : t)));
+    await updateTimetableEntryInFirestore(id, entryData);
+
     try {
       await fetch(`/api/timetable/${id}`, {
         method: 'PUT',
@@ -409,83 +474,180 @@ export default function App() {
         body: JSON.stringify(entryData),
       });
     } catch (e) {
-      console.log('Updated locally');
+      console.log('Updated API locally');
     }
-    setTimetable((prev) => prev.map((t) => (t.id === id ? { ...t, ...entryData } : t)));
   };
 
   const handleDeleteEntry = async (id: string) => {
+    setTimetable((prev) => prev.filter((t) => t.id !== id));
+    await deleteTimetableEntryFromFirestore(id);
+
     try {
       await fetch(`/api/timetable/${id}`, { method: 'DELETE' });
     } catch (e) {
-      console.log('Deleted locally');
+      console.log('Deleted API locally');
     }
-    setTimetable((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const handleBulkImport = async (entries: Partial<TimetableEntry>[], replaceExisting: boolean) => {
-    try {
-      const res = await fetch('/api/timetable/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries, replaceExisting }),
+  const handleBulkImport = async (
+    entries: Partial<TimetableEntry>[],
+    replaceExisting: boolean,
+    rawFileData?: { fileName: string; contentBase64?: string; fileSizeBytes?: number }
+  ): Promise<{ success: boolean; count?: number; error?: string }> => {
+    // 1. Structure each class period entry cleanly
+    const formattedEntries: TimetableEntry[] = entries.map((e, idx) => ({
+      id: e.id || `tt_import_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+      facultyId: e.facultyId || 'fac_1',
+      facultyName: e.facultyName || 'Faculty Member',
+      subjectCode: e.subjectCode || 'CS101',
+      subjectName: e.subjectName || 'Course',
+      room: e.room || 'Room No. C1',
+      day: e.day || 'Monday',
+      startTime: e.startTime || '09:00',
+      endTime: e.endTime || '10:15',
+      batch: e.batch || 'FYUGP',
+      department: e.department || 'Commerce',
+      notes: e.notes || '',
+    }));
+
+    // 2. Pre-Import Backup of current routine if replacing existing data
+    if (replaceExisting && timetable.length > 0) {
+      await createRoutineBackupInFirestore({
+        id: `bkp_pre_import_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'pre_import_backup',
+        description: `Automatic Safety Snapshot before importing ${rawFileData?.fileName || 'routine spreadsheet'}`,
+        totalClasses: timetable.length,
+        entriesSnapshot: timetable,
       });
-      const data = await res.json();
-      if (data.timetable) {
-        setTimetable(data.timetable);
-        return;
-      }
-    } catch (e) {
-      console.log('Processed bulk import locally');
     }
 
-    if (replaceExisting) {
-      const full = entries.map((e, idx) => ({
-        id: `tt_import_${idx}_${Date.now()}`,
-        facultyId: e.facultyId || 'fac_1',
-        facultyName: e.facultyName || 'Faculty',
-        subjectCode: e.subjectCode || 'CS101',
-        subjectName: e.subjectName || 'Course',
-        room: e.room || 'Room No. C1',
-        day: e.day || 'Monday',
-        startTime: e.startTime || '09:00',
-        endTime: e.endTime || '10:15',
-        batch: e.batch || 'CS-1A',
-        department: e.department || 'Computer Science',
-      }));
-      setTimetable(full);
+    // 3. Raw File Retention in Firestore
+    let rawFileId: string | undefined;
+    if (rawFileData) {
+      const fileRes = await saveRawRoutineFileToFirestore({
+        id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        fileName: rawFileData.fileName,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: currentUser?.name || currentUser?.email || 'Academic Admin',
+        fileSizeBytes: rawFileData.fileSizeBytes || 0,
+        contentBase64: rawFileData.contentBase64,
+      });
+      if (fileRes.success) {
+        rawFileId = fileRes.fileId;
+      }
+    }
+
+    // 4. Write directly to persistent Firestore Database
+    const fsResult = await saveTimetableToFirestore(formattedEntries, replaceExisting);
+
+    // 5. Write Confirmation Verification
+    if (fsResult.success) {
+      const newFullRoutine = replaceExisting ? formattedEntries : [...timetable, ...formattedEntries];
+      setTimetable(newFullRoutine);
+
+      // Record Version History Log in Firestore
+      await recordRoutineVersionInFirestore({
+        id: `ver_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        uploadedBy: currentUser?.name || currentUser?.email || 'Academic Admin',
+        fileName: rawFileData?.fileName || 'Routine Upload',
+        totalRecords: formattedEntries.length,
+        mode: replaceExisting ? 'replace' : 'append',
+        changeSummary: replaceExisting
+          ? `Replaced timetable with ${formattedEntries.length} new class schedules`
+          : `Appended ${formattedEntries.length} new class schedules`,
+        rawFileId,
+        rawFileName: rawFileData?.fileName,
+        entriesSnapshot: newFullRoutine,
+      });
+
+      // Also sync memory store on Express backend
+      try {
+        await fetch('/api/timetable/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries: formattedEntries, replaceExisting }),
+        });
+      } catch (e) {
+        console.warn('Backend API import sync notice:', e);
+      }
+
+      return { success: true, count: formattedEntries.length };
     } else {
-      const full = entries.map((e, idx) => ({
-        id: `tt_import_${idx}_${Date.now()}`,
-        facultyId: e.facultyId || 'fac_1',
-        facultyName: e.facultyName || 'Faculty',
-        subjectCode: e.subjectCode || 'CS101',
-        subjectName: e.subjectName || 'Course',
-        room: e.room || 'Room No. C1',
-        day: e.day || 'Monday',
-        startTime: e.startTime || '09:00',
-        endTime: e.endTime || '10:15',
-        batch: e.batch || 'CS-1A',
-        department: e.department || 'Computer Science',
-      }));
-      setTimetable((prev) => [...prev, ...full]);
+      console.error('Failed to save routine to Firestore:', fsResult.error);
+      return { success: false, error: fsResult.error || 'Failed to persist routine data to database.' };
+    }
+  };
+
+  const handleRollbackRoutine = async (entriesSnapshot: TimetableEntry[], versionLabel: string) => {
+    const res = await rollbackRoutineToSnapshot(
+      entriesSnapshot,
+      versionLabel,
+      currentUser?.email || currentUser?.name || 'Admin'
+    );
+    if (res.success) {
+      setTimetable(entriesSnapshot);
+      alert(`✅ Routine Rollback Successful! Restored ${entriesSnapshot.length} class schedules from "${versionLabel}".`);
+    } else {
+      alert(`❌ Rollback Failed: ${res.error}`);
+    }
+  };
+
+  const handleCreateManualBackup = async (description: string) => {
+    const res = await createRoutineBackupInFirestore({
+      id: `bkp_manual_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: 'manual_snapshot',
+      description: description || 'On-Demand Academic Routine Backup',
+      totalClasses: timetable.length,
+      entriesSnapshot: timetable,
+    });
+    if (res.success) {
+      alert(`✅ Manual Backup Snapshot Created! ${timetable.length} class entries archived.`);
+    } else {
+      alert(`❌ Backup Creation Failed: ${res.error}`);
     }
   };
 
   const handleAddFaculty = (fac: Partial<Faculty>) => {
     const newFac: Faculty = {
-      id: `fac_${Date.now()}`,
+      id: fac.id || `fac_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: fac.name || 'New Faculty',
       email: fac.email || 'faculty@college.edu',
       department: fac.department || 'Computer Science',
       designation: fac.designation || 'Lecturer',
+      phone: fac.phone || (fac as any).whatsappPhone || '',
+      employeeId: fac.employeeId || '',
+      isVerified: true,
     };
-    setFacultyList((prev) => [...prev, newFac]);
+
+    setFacultyList((prev) => {
+      // Avoid duplicate faculty by ID or email
+      if (prev.some((f) => f.id === newFac.id || (newFac.email && f.email.toLowerCase() === newFac.email.toLowerCase()))) {
+        return prev;
+      }
+      const updated = [...prev, newFac];
+      try {
+        localStorage.setItem('classpilot_faculty_list', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    // Save to Firestore Database
+    saveFacultyToFirestore(newFac).catch((e) => console.warn('Firestore faculty save notice:', e));
+
+    // Sync with Express backend
+    fetch('/api/faculty', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newFac),
+    }).catch((e) => console.warn('Express faculty sync notice:', e));
   };
 
   const handleAddRoom = (rm: Partial<Room>) => {
     const newRm: Room = {
-      id: `room_${Date.now()}`,
+      id: rm.id || `room_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: rm.name || 'Room X',
       building: rm.building || 'Block A',
       floor: rm.floor || 1,
@@ -493,7 +655,27 @@ export default function App() {
       type: rm.type || 'Lecture Hall',
       equipment: rm.equipment || [],
     };
-    setRoomList((prev) => [...prev, newRm]);
+
+    setRoomList((prev) => {
+      if (prev.some((r) => r.id === newRm.id || r.name.toLowerCase() === newRm.name.toLowerCase())) {
+        return prev;
+      }
+      const updated = [...prev, newRm];
+      try {
+        localStorage.setItem('classpilot_room_list', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    // Save to Firestore Database
+    saveRoomToFirestore(newRm).catch((e) => console.warn('Firestore room save notice:', e));
+
+    // Sync with Express backend
+    fetch('/api/rooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRm),
+    }).catch((e) => console.warn('Express room sync notice:', e));
   };
 
   const handleResetData = () => {
@@ -649,11 +831,15 @@ export default function App() {
             facultyList={facultyList}
             roomList={roomList}
             students={students}
+            routineVersions={routineVersions}
+            routineBackups={routineBackups}
             onUpdateStudents={handleUpdateStudents}
             onAddEntry={handleAddEntry}
             onUpdateEntry={handleUpdateEntry}
             onDeleteEntry={handleDeleteEntry}
             onBulkImport={handleBulkImport}
+            onRollbackRoutine={handleRollbackRoutine}
+            onCreateManualBackup={handleCreateManualBackup}
             onAddFaculty={handleAddFaculty}
             onAddRoom={handleAddRoom}
             onResetData={handleResetData}

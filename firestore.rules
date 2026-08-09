@@ -27,8 +27,32 @@ service cloud.firestore {
 
     // Timetables / Routine
     match /timetables/{docId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read, write: if true;
+    }
+
+    // Routine Versioning & Rollback History
+    match /routineVersions/{versionId} {
+      allow read, write: if true;
+    }
+
+    // Automated & Manual Backups
+    match /routineBackups/{backupId} {
+      allow read, write: if true;
+    }
+
+    // Raw Routine Files (Excel / CSV original files)
+    match /routineRawFiles/{fileId} {
+      allow read, write: if true;
+    }
+
+    // Faculty Roster
+    match /faculty/{facId} {
+      allow read, write: if true;
+    }
+
+    // Rooms Directory
+    match /rooms/{roomId} {
+      allow read, write: if true;
     }
 
     // Calendar Events

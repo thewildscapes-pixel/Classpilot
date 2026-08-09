@@ -8,6 +8,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   collection,
   onSnapshot,
   addDoc,
@@ -19,7 +20,7 @@ import {
   serverTimestamp,
   FirebaseUser,
 } from './firebase';
-import { User, TimetableEntry, ClassDiaryEntry } from '../types';
+import { User, TimetableEntry, ClassDiaryEntry, RoutineVersion, RoutineBackup, RawRoutineFile, Faculty, Room } from '../types';
 
 // ==========================================
 // 1. AUTHENTICATION & FACULTY PROFILES
@@ -152,7 +153,7 @@ export async function firebaseSignOut(): Promise<void> {
 }
 
 // ==========================================
-// 2. REAL-TIME TIMETABLE SYNC
+// 2. REAL-TIME TIMETABLE SYNC & FIRESTORE PERSISTENCE
 // ==========================================
 
 /**
@@ -179,12 +180,11 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
           endTime: data.endTime || '',
           batch: data.batch || '',
           department: data.department || '',
+          notes: data.notes || '',
         });
       });
 
-      if (entries.length > 0) {
-        callback(entries);
-      }
+      callback(entries);
     },
     (error) => {
       console.warn('Realtime timetable listener error:', error);
@@ -193,16 +193,513 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
 }
 
 /**
- * Save / Upload Timetable batch to Firestore (Admin function)
+ * Save / Upload Timetable batch to Firestore (Admin function).
+ * Ensures one document per class period for proper querying and faculty schedule views.
  */
-export async function saveTimetableToFirestore(entries: TimetableEntry[]): Promise<void> {
-  for (const entry of entries) {
-    const docRef = doc(db, 'timetables', entry.id || `tt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+export async function saveTimetableToFirestore(
+  entries: TimetableEntry[],
+  replaceExisting: boolean = false
+): Promise<{ success: boolean; count: number; error?: string }> {
+  try {
+    if (replaceExisting) {
+      // Clear all existing documents in timetables collection
+      const existingSnapshot = await getDocs(collection(db, 'timetables'));
+      const deletePromises = existingSnapshot.docs.map((docSnap) =>
+        deleteDoc(doc(db, 'timetables', docSnap.id))
+      );
+      await Promise.all(deletePromises);
+    }
+
+    // Write each timetable record to timetables collection in Firestore
+    const writePromises = entries.map((entry, idx) => {
+      const docId = entry.id || `tt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+      const docRef = doc(db, 'timetables', docId);
+
+      const cleanEntry: TimetableEntry = {
+        id: docId,
+        facultyId: entry.facultyId || 'fac_1',
+        facultyName: entry.facultyName || 'Faculty Member',
+        subjectCode: entry.subjectCode || 'CS101',
+        subjectName: entry.subjectName || 'General Subject',
+        room: entry.room || 'Room No. C1',
+        day: entry.day || 'Monday',
+        startTime: entry.startTime || '09:00',
+        endTime: entry.endTime || '10:15',
+        batch: entry.batch || 'FYUGP',
+        department: entry.department || 'Commerce',
+        notes: entry.notes || '',
+      };
+
+      return setDoc(docRef, {
+        ...cleanEntry,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    await Promise.all(writePromises);
+    return { success: true, count: entries.length };
+  } catch (error: any) {
+    console.error('Error saving timetable batch to Firestore:', error);
+    return {
+      success: false,
+      count: 0,
+      error: error?.message || 'Failed to write routine entries to Firestore database.',
+    };
+  }
+}
+
+/**
+ * Single Entry Add to Firestore
+ */
+export async function addTimetableEntryToFirestore(entryData: Partial<TimetableEntry>): Promise<{ success: boolean; entry?: TimetableEntry; error?: string }> {
+  try {
+    const docId = entryData.id || `tt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const docRef = doc(db, 'timetables', docId);
+
+    const newEntry: TimetableEntry = {
+      id: docId,
+      facultyId: entryData.facultyId || 'fac_1',
+      facultyName: entryData.facultyName || 'Dr. Deborshee Gogoi',
+      subjectCode: entryData.subjectCode || 'CS101',
+      subjectName: entryData.subjectName || 'New Class',
+      room: entryData.room || 'Room No. C1',
+      day: entryData.day || 'Monday',
+      startTime: entryData.startTime || '09:00',
+      endTime: entryData.endTime || '10:15',
+      batch: entryData.batch || 'CS-1A',
+      department: entryData.department || 'Computer Science',
+      notes: entryData.notes || '',
+    };
+
     await setDoc(docRef, {
-      ...entry,
+      ...newEntry,
       updatedAt: serverTimestamp(),
     });
+
+    return { success: true, entry: newEntry };
+  } catch (err: any) {
+    console.error('Failed to add entry to Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to add entry to Firestore' };
   }
+}
+
+/**
+ * Single Entry Update in Firestore
+ */
+export async function updateTimetableEntryInFirestore(id: string, entryData: Partial<TimetableEntry>): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, 'timetables', id);
+    await setDoc(docRef, { ...entryData, updatedAt: serverTimestamp() }, { merge: true });
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to update entry in Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to update entry' };
+  }
+}
+
+/**
+ * Single Entry Delete from Firestore
+ */
+export async function deleteTimetableEntryFromFirestore(id: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, 'timetables', id);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to delete entry from Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to delete entry' };
+  }
+}
+
+// ==========================================
+// 2B. DATA BACKUP, VERSION HISTORY & RAW FILE RETENTION
+// ==========================================
+
+/**
+ * Save Raw Uploaded Excel / CSV file content in Firestore collection `routineRawFiles`
+ */
+export async function saveRawRoutineFileToFirestore(
+  rawFile: RawRoutineFile
+): Promise<{ success: boolean; fileId?: string; error?: string }> {
+  try {
+    const fileId = rawFile.id || `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const docRef = doc(db, 'routineRawFiles', fileId);
+
+    await setDoc(docRef, {
+      ...rawFile,
+      id: fileId,
+      uploadedAt: rawFile.uploadedAt || new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+
+    return { success: true, fileId };
+  } catch (err: any) {
+    console.error('Failed to store raw file in Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to store raw file' };
+  }
+}
+
+/**
+ * Retrieve Raw Uploaded Excel / CSV file from Firestore by ID
+ */
+export async function getRawRoutineFileFromFirestore(fileId: string): Promise<RawRoutineFile | null> {
+  try {
+    const docRef = doc(db, 'routineRawFiles', fileId);
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      return snap.data() as RawRoutineFile;
+    }
+    return null;
+  } catch (err) {
+    console.error('Error fetching raw file from Firestore:', err);
+    return null;
+  }
+}
+
+/**
+ * Log a new Routine Upload Version in Firestore `routineVersions`
+ */
+export async function recordRoutineVersionInFirestore(
+  version: RoutineVersion
+): Promise<{ success: boolean; versionId?: string; error?: string }> {
+  try {
+    const versionId = version.id || `ver_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const docRef = doc(db, 'routineVersions', versionId);
+
+    await setDoc(docRef, {
+      ...version,
+      id: versionId,
+      timestamp: version.timestamp || new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+
+    return { success: true, versionId };
+  } catch (err: any) {
+    console.error('Failed to record routine version in Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to record routine version' };
+  }
+}
+
+/**
+ * Realtime Subscription for Routine Versions
+ */
+export function subscribeToRoutineVersionsRealtime(callback: (versions: RoutineVersion[]) => void) {
+  const colRef = collection(db, 'routineVersions');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const versions: RoutineVersion[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        versions.push({
+          id: docSnap.id,
+          timestamp: data.timestamp || new Date().toISOString(),
+          uploadedBy: data.uploadedBy || 'Admin',
+          fileName: data.fileName || 'Routine.xlsx',
+          totalRecords: data.totalRecords || 0,
+          mode: data.mode || 'replace',
+          changeSummary: data.changeSummary || 'Routine updated',
+          rawFileId: data.rawFileId,
+          rawFileName: data.rawFileName,
+          entriesSnapshot: data.entriesSnapshot || [],
+        });
+      });
+      versions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      callback(versions);
+    },
+    (err) => {
+      console.warn('Realtime subscription notice for routineVersions:', err);
+    }
+  );
+}
+
+/**
+ * Create a Manual or Automated Backup Snapshot in Firestore `routineBackups`
+ */
+export async function createRoutineBackupInFirestore(
+  backup: RoutineBackup
+): Promise<{ success: boolean; backupId?: string; error?: string }> {
+  try {
+    const backupId = backup.id || `bkp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const docRef = doc(db, 'routineBackups', backupId);
+
+    await setDoc(docRef, {
+      ...backup,
+      id: backupId,
+      timestamp: backup.timestamp || new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+
+    return { success: true, backupId };
+  } catch (err: any) {
+    console.error('Failed to create backup snapshot in Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to create backup snapshot' };
+  }
+}
+
+/**
+ * Realtime Subscription for Routine Backups
+ */
+export function subscribeToRoutineBackupsRealtime(callback: (backups: RoutineBackup[]) => void) {
+  const colRef = collection(db, 'routineBackups');
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const backups: RoutineBackup[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        backups.push({
+          id: docSnap.id,
+          timestamp: data.timestamp || new Date().toISOString(),
+          type: data.type || 'manual_snapshot',
+          description: data.description || 'Routine Snapshot',
+          totalClasses: data.totalClasses || 0,
+          entriesSnapshot: data.entriesSnapshot || [],
+        });
+      });
+      backups.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      callback(backups);
+    },
+    (err) => {
+      console.warn('Realtime subscription notice for routineBackups:', err);
+    }
+  );
+}
+
+/**
+ * Automated Daily / Scheduled Backup trigger check
+ */
+export async function checkAndTriggerAutomatedDailyBackup(entries: TimetableEntry[]): Promise<boolean> {
+  if (!entries || entries.length === 0) return false;
+
+  try {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const colRef = collection(db, 'routineBackups');
+    const snap = await getDocs(colRef);
+
+    const hasTodayBackup = snap.docs.some((docSnap) => {
+      const d = docSnap.data();
+      return d.type === 'automated_daily' && d.timestamp && d.timestamp.startsWith(todayStr);
+    });
+
+    if (!hasTodayBackup) {
+      await createRoutineBackupInFirestore({
+        id: `bkp_auto_${todayStr}_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'automated_daily',
+        description: `Automated Daily Scheduled System Backup (${todayStr})`,
+        totalClasses: entries.length,
+        entriesSnapshot: entries,
+      });
+      return true;
+    }
+  } catch (e) {
+    console.warn('Automated daily backup check notice:', e);
+  }
+  return false;
+}
+
+/**
+ * Rollback Live Database Routine to a specific Version or Backup Snapshot!
+ */
+export async function rollbackRoutineToSnapshot(
+  entriesSnapshot: TimetableEntry[],
+  versionLabel: string,
+  userEmail: string
+): Promise<{ success: boolean; count?: number; error?: string }> {
+  try {
+    // 1. Create a safety pre-rollback snapshot of current live database first
+    const currentLiveSnap = await getDocs(collection(db, 'timetables'));
+    const currentLiveEntries: TimetableEntry[] = currentLiveSnap.docs.map((d) => d.data() as TimetableEntry);
+
+    if (currentLiveEntries.length > 0) {
+      await createRoutineBackupInFirestore({
+        id: `bkp_pre_rollback_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'pre_import_backup',
+        description: `Pre-Rollback Safety Snapshot before rolling back to "${versionLabel}"`,
+        totalClasses: currentLiveEntries.length,
+        entriesSnapshot: currentLiveEntries,
+      });
+    }
+
+    // 2. Overwrite live timetables collection with target entriesSnapshot
+    const saveRes = await saveTimetableToFirestore(entriesSnapshot, true);
+
+    if (!saveRes.success) {
+      return { success: false, error: saveRes.error };
+    }
+
+    // 3. Record a rollback version log in routineVersions
+    await recordRoutineVersionInFirestore({
+      id: `ver_rollback_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      uploadedBy: userEmail || 'Admin',
+      fileName: `Rollback: ${versionLabel}`,
+      totalRecords: entriesSnapshot.length,
+      mode: 'replace',
+      changeSummary: `Restored database routine back to version: ${versionLabel}`,
+      entriesSnapshot: entriesSnapshot,
+    });
+
+    return { success: true, count: entriesSnapshot.length };
+  } catch (err: any) {
+    console.error('Error executing routine rollback:', err);
+    return { success: false, error: err?.message || 'Rollback failed' };
+  }
+}
+
+// ==========================================
+// 2C. FACULTY ROSTER & ROOMS PERSISTENCE
+// ==========================================
+
+/**
+ * Save a single Faculty record to Firestore collection `faculty`
+ */
+export async function saveFacultyToFirestore(faculty: Faculty): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, 'faculty', faculty.id);
+    await setDoc(
+      docRef,
+      {
+        ...faculty,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to save faculty to Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to save faculty' };
+  }
+}
+
+/**
+ * Bulk save Faculty list to Firestore collection `faculty`
+ */
+export async function saveFacultyListToFirestore(facultyList: Faculty[]): Promise<void> {
+  for (const fac of facultyList) {
+    await saveFacultyToFirestore(fac);
+  }
+}
+
+/**
+ * Realtime Subscription for Faculty Roster in Firestore
+ */
+export function subscribeToFacultyRealtime(
+  initialFallback: Faculty[],
+  callback: (facultyList: Faculty[]) => void
+) {
+  const colRef = collection(db, 'faculty');
+  return onSnapshot(
+    colRef,
+    async (snapshot) => {
+      if (snapshot.empty) {
+        if (initialFallback && initialFallback.length > 0) {
+          saveFacultyListToFirestore(initialFallback).catch(() => {});
+          callback(initialFallback);
+        } else {
+          callback([]);
+        }
+        return;
+      }
+
+      const list: Faculty[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          name: data.name || 'Faculty Member',
+          email: data.email || 'faculty@college.edu',
+          department: data.department || 'Computer Science',
+          designation: data.designation || 'Assistant Professor',
+          phone: data.phone || data.whatsappPhone || '',
+          employeeId: data.employeeId || '',
+          isVerified: data.isVerified ?? true,
+        });
+      });
+
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      callback(list);
+    },
+    (err) => {
+      console.warn('Realtime subscription notice for faculty:', err);
+    }
+  );
+}
+
+/**
+ * Save a single Room record to Firestore collection `rooms`
+ */
+export async function saveRoomToFirestore(room: Room): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, 'rooms', room.id);
+    await setDoc(
+      docRef,
+      {
+        ...room,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to save room to Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to save room' };
+  }
+}
+
+/**
+ * Bulk save Room list to Firestore collection `rooms`
+ */
+export async function saveRoomListToFirestore(roomList: Room[]): Promise<void> {
+  for (const rm of roomList) {
+    await saveRoomToFirestore(rm);
+  }
+}
+
+/**
+ * Realtime Subscription for Rooms Directory in Firestore
+ */
+export function subscribeToRoomsRealtime(
+  initialFallback: Room[],
+  callback: (roomList: Room[]) => void
+) {
+  const colRef = collection(db, 'rooms');
+  return onSnapshot(
+    colRef,
+    async (snapshot) => {
+      if (snapshot.empty) {
+        if (initialFallback && initialFallback.length > 0) {
+          saveRoomListToFirestore(initialFallback).catch(() => {});
+          callback(initialFallback);
+        } else {
+          callback([]);
+        }
+        return;
+      }
+
+      const list: Room[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          name: data.name || 'Room',
+          building: data.building || 'Main Block',
+          floor: data.floor || 1,
+          capacity: data.capacity || 50,
+          type: data.type || 'Lecture Hall',
+          equipment: data.equipment || [],
+        });
+      });
+
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      callback(list);
+    },
+    (err) => {
+      console.warn('Realtime subscription notice for rooms:', err);
+    }
+  );
 }
 
 // ==========================================
