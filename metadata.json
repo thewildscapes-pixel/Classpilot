@@ -1,0 +1,6 @@
+{
+  "name": "ClassPilot",
+  "description": "Modern faculty management app for Digboi College (Autonomous) with automated class-period alerts, Class Diary, NAAC/NBA compliance audit reporting, and Google Calendar sync.",
+  "requestFramePermissions": ["notifications"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

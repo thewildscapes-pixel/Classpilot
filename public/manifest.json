@@ -1,0 +1,22 @@
+{
+  "short_name": "Faculty Alert",
+  "name": "College Faculty Timetable & Class Notification",
+  "icons": [
+    {
+      "src": "pwa-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "pwa-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "display": "standalone",
+  "orientation": "any",
+  "description": "Timetable tracker, live class countdowns, and 10-minute automated alerts for college faculty."
+}

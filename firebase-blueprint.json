@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Faculty and Admin User profiles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "department": { "type": "string" },
+        "designation": { "type": "string" },
+        "role": { "type": "string" },
+        "whatsappPhone": { "type": "string" },
+        "facultyId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "email", "role"]
+    },
+    "ClassDiaryEntry": {
+      "title": "Class Diary Entry",
+      "description": "Class diary records submitted by faculty for NAAC/NBA compliance",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "facultyId": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "department": { "type": "string" },
+        "date": { "type": "string" },
+        "timePeriod": { "type": "string" },
+        "subject": { "type": "string" },
+        "topicTaught": { "type": "string" },
+        "teachingMethod": { "type": "string" },
+        "studentsPresent": { "type": "number" },
+        "roomNo": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "facultyId", "date", "subject", "topicTaught"]
+    },
+    "TimetableEntry": {
+      "title": "Timetable Entry",
+      "description": "Faculty weekly timetable slots",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "facultyId": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "department": { "type": "string" },
+        "day": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "subject": { "type": "string" },
+        "roomNo": { "type": "string" },
+        "batch": { "type": "string" }
+      },
+      "required": ["id", "facultyId", "day", "startTime", "endTime", "subject"]
+    }
+  }
+}
