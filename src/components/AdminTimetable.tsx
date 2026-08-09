@@ -66,6 +66,8 @@ interface AdminTimetableProps {
   onRollbackRoutine?: (entriesSnapshot: TimetableEntry[], versionLabel: string) => Promise<void> | void;
   onCreateManualBackup?: (description: string) => Promise<void> | void;
   onAddFaculty: (faculty: Partial<Faculty>) => void;
+  onDeleteFaculty?: (id: string) => void;
+  onClearAllFaculty?: () => void;
   onAddRoom: (room: Partial<Room>) => void;
   onResetData: () => void;
   onToggleUserAdminRole?: (userEmail: string, makeAdmin: boolean) => void;
@@ -87,6 +89,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   onRollbackRoutine,
   onCreateManualBackup,
   onAddFaculty,
+  onDeleteFaculty,
+  onClearAllFaculty,
   onAddRoom,
   onResetData,
   onToggleUserAdminRole,
@@ -2153,16 +2157,32 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
           {/* ROUTINE VS PRE-REGISTRATION FACULTY AUDIT TABLE */}
           <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-5 space-y-3 shadow-xl">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center space-x-2">
                 <Shield className="w-5 h-5 text-amber-400" />
                 <h4 className="font-heading font-extrabold text-base text-white">
-                  Routine vs. Pre-Registered Faculty Audit & Match Status
+                  Faculty Roster & Audit Match Status
                 </h4>
               </div>
-              <span className="text-xs text-slate-400">
-                {facultyList.length} Faculty Accounts Registered
-              </span>
+              <div className="flex items-center space-x-3">
+                <span className="text-xs text-slate-400">
+                  {facultyList.length} Faculty Members
+                </span>
+                {facultyList.length > 0 && onClearAllFaculty && (
+                  <button
+                    onClick={() => {
+                      if (confirm('⚠️ Are you sure you want to delete ALL faculty members from the roster? This action cannot be undone.')) {
+                        onClearAllFaculty();
+                      }
+                    }}
+                    className="px-2.5 py-1 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/60 rounded-lg text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                    title="Delete all registered default & custom faculty"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear All Faculty</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="overflow-x-auto">
@@ -2175,6 +2195,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                     <th className="p-3">Employee ID</th>
                     <th className="p-3">Routine Classes Count</th>
                     <th className="p-3">Audit Status</th>
+                    <th className="p-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/50">
@@ -2208,6 +2229,21 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                               ⚠️ Action: Add Mobile Number
                             </span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">
+                          {onDeleteFaculty && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Remove "${fac.name}" from Faculty Roster?`)) {
+                                  onDeleteFaculty(fac.id);
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer"
+                              title="Delete Faculty Member"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
                         </td>
                       </tr>

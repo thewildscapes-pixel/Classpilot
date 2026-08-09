@@ -44,8 +44,11 @@ import {
   rollbackRoutineToSnapshot,
   subscribeToFacultyRealtime,
   saveFacultyToFirestore,
+  deleteFacultyFromFirestore,
+  clearAllFacultyInFirestore,
   subscribeToRoomsRealtime,
   saveRoomToFirestore,
+  deleteRoomFromFirestore,
 } from './lib/firebaseService';
 
 // Components
@@ -645,6 +648,25 @@ export default function App() {
     }).catch((e) => console.warn('Express faculty sync notice:', e));
   };
 
+  const handleDeleteFaculty = (facId: string) => {
+    setFacultyList((prev) => {
+      const updated = prev.filter((f) => f.id !== facId);
+      try {
+        localStorage.setItem('classpilot_faculty_list', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+    deleteFacultyFromFirestore(facId).catch((e) => console.warn('Firestore faculty delete notice:', e));
+  };
+
+  const handleClearAllFaculty = () => {
+    setFacultyList([]);
+    try {
+      localStorage.setItem('classpilot_faculty_list', JSON.stringify([]));
+    } catch (e) {}
+    clearAllFacultyInFirestore().catch((e) => console.warn('Firestore clear faculty notice:', e));
+  };
+
   const handleAddRoom = (rm: Partial<Room>) => {
     const newRm: Room = {
       id: rm.id || `room_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -841,6 +863,8 @@ export default function App() {
             onRollbackRoutine={handleRollbackRoutine}
             onCreateManualBackup={handleCreateManualBackup}
             onAddFaculty={handleAddFaculty}
+            onDeleteFaculty={handleDeleteFaculty}
+            onClearAllFaculty={handleClearAllFaculty}
             onAddRoom={handleAddRoom}
             onResetData={handleResetData}
             onToggleUserAdminRole={handleToggleUserAdminRole}

@@ -584,6 +584,36 @@ export async function saveFacultyListToFirestore(facultyList: Faculty[]): Promis
 }
 
 /**
+ * Delete a single Faculty member from Firestore
+ */
+export async function deleteFacultyFromFirestore(facultyId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, 'faculty', facultyId);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to delete faculty from Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to delete faculty' };
+  }
+}
+
+/**
+ * Clear all Faculty members from Firestore
+ */
+export async function clearAllFacultyInFirestore(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const colRef = collection(db, 'faculty');
+    const snap = await getDocs(colRef);
+    const deletePromises = snap.docs.map((docSnap) => deleteDoc(docSnap.ref));
+    await Promise.all(deletePromises);
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to clear faculty from Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to clear faculty' };
+  }
+}
+
+/**
  * Realtime Subscription for Faculty Roster in Firestore
  */
 export function subscribeToFacultyRealtime(
@@ -594,8 +624,11 @@ export function subscribeToFacultyRealtime(
   return onSnapshot(
     colRef,
     async (snapshot) => {
+      // Check if user explicitly initialized or cleared localStorage
+      const hasStoredLocal = localStorage.getItem('classpilot_faculty_list') !== null;
+
       if (snapshot.empty) {
-        if (initialFallback && initialFallback.length > 0) {
+        if (!hasStoredLocal && initialFallback && initialFallback.length > 0) {
           saveFacultyListToFirestore(initialFallback).catch(() => {});
           callback(initialFallback);
         } else {
@@ -659,6 +692,20 @@ export async function saveRoomListToFirestore(roomList: Room[]): Promise<void> {
 }
 
 /**
+ * Delete a single Room record from Firestore
+ */
+export async function deleteRoomFromFirestore(roomId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docRef = doc(db, 'rooms', roomId);
+    await deleteDoc(docRef);
+    return { success: true };
+  } catch (err: any) {
+    console.error('Failed to delete room from Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to delete room' };
+  }
+}
+
+/**
  * Realtime Subscription for Rooms Directory in Firestore
  */
 export function subscribeToRoomsRealtime(
@@ -669,8 +716,10 @@ export function subscribeToRoomsRealtime(
   return onSnapshot(
     colRef,
     async (snapshot) => {
+      const hasStoredLocal = localStorage.getItem('classpilot_room_list') !== null;
+
       if (snapshot.empty) {
-        if (initialFallback && initialFallback.length > 0) {
+        if (!hasStoredLocal && initialFallback && initialFallback.length > 0) {
           saveRoomListToFirestore(initialFallback).catch(() => {});
           callback(initialFallback);
         } else {
