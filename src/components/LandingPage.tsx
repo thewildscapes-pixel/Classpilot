@@ -22,6 +22,7 @@ import {
 
 interface LandingPageProps {
   currentUser: User | null;
+  facultyList?: Faculty[];
   onLoginSuccess: (user: User, token: string) => void;
   onLogout: () => void;
   onGoToDashboard?: () => void;
@@ -29,6 +30,7 @@ interface LandingPageProps {
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   currentUser,
+  facultyList = [],
   onLoginSuccess,
   onLogout,
   onGoToDashboard,
@@ -54,12 +56,25 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     e.preventDefault();
     setErrorMessage('');
 
-    if (!email || !email.includes('@')) {
-      setErrorMessage('Please enter a valid email address.');
+    const cleanPhone = phone.trim().replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 8) {
+      setErrorMessage('Please enter a valid 10-digit mobile number.');
       return;
     }
-    if (!phone || phone.length < 8) {
-      setErrorMessage('Please enter a valid WhatsApp phone number.');
+
+    // Check pre-registered faculty records or superadmin
+    const matchedFac = facultyList.find(
+      (f) =>
+        (f.phone && f.phone.replace(/\D/g, '') === cleanPhone) ||
+        (f.whatsappPhone && f.whatsappPhone.replace(/\D/g, '') === cleanPhone)
+    );
+
+    const matchedAdmin = cleanPhone === '9706375001' || email.toLowerCase().includes('thewildscapes');
+
+    if (!matchedFac && !matchedAdmin && facultyList.length > 0) {
+      setErrorMessage(
+        'Number not registered in faculty database — please contact your department admin at Digboi College to pre-register your mobile number.'
+      );
       return;
     }
 
@@ -77,31 +92,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     const code = otpDigits.join('');
 
     if (code.length < 6) {
-      setErrorMessage('Please enter the complete 6-digit OTP sent to your Email & WhatsApp.');
+      setErrorMessage('Please enter the complete 6-digit OTP.');
       return;
     }
 
     setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
-      const nameFromEmail = email.toLowerCase().includes('sampreeti')
-        ? 'Dr. Sampreeti Boruah'
-        : email.toLowerCase().includes('murchana')
-        ? 'Dr. Murchana Gogoi'
-        : email.toLowerCase().includes('subhadeep')
-        ? 'Dr. Subhadeep Chakraborty'
-        : email.toLowerCase().includes('viveka')
-        ? 'Dr. Viveka Gupta'
-        : 'Dr. Deborshee Gogoi';
+      const cleanPhone = phone.trim().replace(/\D/g, '');
+      const matchedFac = facultyList.find(
+        (f) =>
+          (f.phone && f.phone.replace(/\D/g, '') === cleanPhone) ||
+          (f.whatsappPhone && f.whatsappPhone.replace(/\D/g, '') === cleanPhone)
+      );
 
       const newUser: User = {
-        id: `user_${Date.now()}`,
-        name: nameFromEmail,
-        email: email.trim(),
-        whatsappPhone: phone.trim(),
-        role: 'faculty',
-        facultyId: 'fac_1',
-        department: department,
+        id: matchedFac ? matchedFac.id : `user_${Date.now()}`,
+        name: matchedFac ? matchedFac.name : 'Dr. Deborshee Gogoi',
+        email: matchedFac ? matchedFac.email : email.trim() || 'thewildscapes@gmail.com',
+        phone: cleanPhone,
+        whatsappPhone: cleanPhone,
+        role: matchedAdminOrFacRole(cleanPhone, email),
+        facultyId: matchedFac ? matchedFac.id : 'fac_1',
+        department: matchedFac ? matchedFac.department : department,
+        employeeId: matchedFac?.employeeId || 'DC-EMP-001',
         isVerified: true,
       };
 
@@ -109,6 +123,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       onLoginSuccess(newUser, `token_${Date.now()}`);
       setIsAuthMode(false);
     }, 400);
+  };
+
+  const matchedAdminOrFacRole = (p: string, e: string) => {
+    if (p === '9706375001' || e.includes('thewildscapes')) return 'admin';
+    return 'faculty';
   };
 
   // Google Sign In trigger via Firebase Auth
@@ -290,9 +309,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             ) : (
               /* OTP Verification Step */
               <form onSubmit={handleVerifyOtp} className="space-y-4 bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200/80 text-left">
+                <div className="p-2.5 bg-amber-100/80 border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold flex items-center justify-between">
+                  <span>📲 Simulated SMS OTP Sent: <strong className="text-amber-950 font-mono text-sm">849201</strong></span>
+                  <span className="text-[10px] text-amber-700 font-normal">Auto-filled</span>
+                </div>
                 <div className="space-y-1">
                   <div className="text-xs font-extrabold text-emerald-900 flex items-center justify-between">
-                    <span>Enter 6-Digit OTP</span>
+                    <span>Enter 6-Digit Mobile OTP</span>
                     <button
                       type="button"
                       onClick={() => setOtpStep(false)}

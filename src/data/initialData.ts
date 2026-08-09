@@ -3,7 +3,41 @@ import { Faculty, Room, Student, TimetableEntry, User } from '../types';
 // Prototype ships with a clean state — no sample/dummy data.
 // Real data is populated dynamically via Excel import or live admin creation.
 
-export const INITIAL_FACULTY: Faculty[] = [];
+export const INITIAL_FACULTY: Faculty[] = [
+  {
+    id: 'fac_1',
+    name: 'Dr. Deborshee Gogoi',
+    email: 'thewildscapes@gmail.com',
+    department: 'Commerce',
+    designation: 'Associate Professor',
+    phone: '9706375001',
+    whatsappPhone: '9706375001',
+    employeeId: 'DC-EMP-001',
+    isVerified: true,
+  },
+  {
+    id: 'fac_2',
+    name: 'Dr. Jitu Borah',
+    email: 'jitu.borah@digboicollege.edu.in',
+    department: 'Economics',
+    designation: 'Assistant Professor',
+    phone: '9876543210',
+    whatsappPhone: '9876543210',
+    employeeId: 'DC-EMP-002',
+    isVerified: true,
+  },
+  {
+    id: 'fac_3',
+    name: 'Prof. Rashmi Saikia',
+    email: 'rashmi.s@digboicollege.edu.in',
+    department: 'Commerce',
+    designation: 'Assistant Professor',
+    phone: '9101234567',
+    whatsappPhone: '9101234567',
+    employeeId: 'DC-EMP-003',
+    isVerified: true,
+  },
+];
 
 export const INITIAL_ROOMS: Room[] = [];
 

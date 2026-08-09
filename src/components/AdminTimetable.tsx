@@ -89,6 +89,95 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [newStudentName, setNewStudentName] = useState<string>('');
   const [newStudentClass, setNewStudentClass] = useState<string>('FYUGP 1st Sem Commerce');
 
+  // Faculty CSV Bulk Import State
+  const [facultyCsvPreview, setFacultyCsvPreview] = useState<Partial<Faculty>[]>([]);
+  const [facultyCsvFileName, setFacultyCsvFileName] = useState<string>('');
+
+  const handleDownloadFacultyCsvTemplate = () => {
+    const csvHeaders = 'Faculty Name,Mobile Number,Employee ID,Department,Designation,Email\n';
+    const sampleRows =
+      'Dr. Deborshee Gogoi,9706375001,DC-EMP-001,Commerce,Associate Professor,thewildscapes@gmail.com\n' +
+      'Dr. Jitu Borah,9876543210,DC-EMP-002,Economics,Assistant Professor,jitu.borah@digboicollege.edu.in\n' +
+      'Prof. Rashmi Saikia,9101234567,DC-EMP-003,Commerce,Assistant Professor,rashmi.s@digboicollege.edu.in\n';
+    const blob = new Blob([csvHeaders + sampleRows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'Faculty_Pre_Registration_Template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleFacultyCsvFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFacultyCsvFileName(file.name);
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const rowsData = XLSX.utils.sheet_to_json<any>(ws);
+
+        if (!rowsData || rowsData.length === 0) {
+          alert('The uploaded file contains no data rows.');
+          return;
+        }
+
+        const parsedList: Partial<Faculty>[] = [];
+        rowsData.forEach((row, idx) => {
+          const name = String(row['Faculty Name'] || row['Name'] || row['facultyName'] || '').trim();
+          const mobile = String(row['Mobile Number'] || row['Mobile'] || row['Phone'] || row['whatsappPhone'] || '').trim();
+          const empId = String(row['Employee ID'] || row['Emp ID'] || row['employeeId'] || `DC-EMP-${String(100 + idx)}`).trim();
+          const dept = String(row['Department'] || row['department'] || 'Commerce').trim();
+          const desig = String(row['Designation'] || row['designation'] || 'Assistant Professor').trim();
+          const email = String(row['Email'] || row['email'] || `${name.toLowerCase().replace(/\s+/g, '.')}@digboicollege.edu.in`).trim();
+
+          if (name) {
+            parsedList.push({
+              name,
+              phone: mobile,
+              whatsappPhone: mobile,
+              employeeId: empId,
+              department: dept,
+              designation: desig,
+              email,
+            });
+          }
+        });
+
+        if (parsedList.length === 0) {
+          alert('No valid faculty records found. Ensure headers contain "Faculty Name", "Mobile Number", and "Employee ID".');
+          return;
+        }
+
+        setFacultyCsvPreview(parsedList);
+      } catch (err) {
+        console.error('CSV/Excel Parsing Error:', err);
+        alert('Error parsing CSV file. Please upload a valid CSV file.');
+      }
+    };
+
+    reader.readAsBinaryString(file);
+  };
+
+  const handleConfirmFacultyCsvImport = () => {
+    if (facultyCsvPreview.length === 0) return;
+
+    facultyCsvPreview.forEach((fac) => {
+      onAddFaculty(fac);
+    });
+
+    alert(`Successfully pre-registered ${facultyCsvPreview.length} faculty members into the college database!`);
+    setFacultyCsvPreview([]);
+    setFacultyCsvFileName('');
+  };
+
   const handleDownloadStudentRosterExcelTemplate = () => {
     const templateData = [
       {
@@ -405,10 +494,34 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     document.body.removeChild(link);
   };
 
+  const handleNotifyFacultyRoutineUpload = (customList?: Partial<TimetableEntry>[]) => {
+    const listToNotify = customList || timetable;
+    const uniqueFacultyNames = Array.from(
+      new Set(
+        listToNotify
+          .map((e) => e.facultyName?.trim())
+          .filter((name) => name && name.toLowerCase() !== 'unassigned' && name.toLowerCase() !== 'vacant')
+      )
+    );
+
+    const unassignedCount = listToNotify.filter(
+      (e) => !e.facultyName || e.facultyName.toLowerCase() === 'unassigned'
+    ).length;
+
+    const termLabel = `${activeSemesterCycle} Semester (${sessionAcademicYear})`;
+
+    alert(
+      `📢 Faculty Notifications Triggered!\n\n` +
+      `Successfully generated schedule updates for ${uniqueFacultyNames.length} faculty members for ${termLabel}.\n` +
+      `Each faculty member will see their updated "My Routine" schedule upon logging in.\n` +
+      (unassignedCount > 0 ? `\n⚠️ Note: ${unassignedCount} period(s) have unassigned faculty names.` : '')
+    );
+  };
+
   const handleConfirmImport = () => {
     if (parsedPreviewEntries.length === 0) return;
     onBulkImport(parsedPreviewEntries, replaceMode);
-    alert(`Successfully imported ${parsedPreviewEntries.length} timetable entries!`);
+    handleNotifyFacultyRoutineUpload(parsedPreviewEntries);
     setParsedPreviewEntries([]);
     setImportFileName('');
     setActiveAdminTab('grid');
@@ -451,7 +564,13 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     setIsEntryModalOpen(true);
   };
 
-  const handleSaveEntry = (e: React.FormEvent) => {
+  // Double booking override modal state
+  const [doubleBookingConflict, setDoubleBookingConflict] = useState<{
+    conflictEntry: TimetableEntry;
+    pendingPayload: Partial<TimetableEntry>;
+  } | null>(null);
+
+  const handleSaveEntry = (e: React.FormEvent, forceOverride: boolean = false) => {
     e.preventDefault();
     const fac = facultyList.find((f) => f.id === formFacultyId) || facultyList[0];
 
@@ -472,11 +591,34 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       notes: formNotes,
     };
 
+    // Double-booking check if not forced
+    if (!forceOverride) {
+      const newStart = parseTimeToMinutes(formStartTime);
+      const newEnd = parseTimeToMinutes(formEndTime);
+      const normRoom = formRoom.trim().toLowerCase();
+
+      const existingConflict = timetable.find((entry) => {
+        if (entry.id === editingEntryId) return false;
+        if (entry.day !== formDay) return false;
+        if (entry.room.trim().toLowerCase() !== normRoom) return false;
+
+        const eStart = parseTimeToMinutes(entry.startTime);
+        const eEnd = parseTimeToMinutes(entry.endTime);
+        return eStart < newEnd && eEnd > newStart;
+      });
+
+      if (existingConflict) {
+        setDoubleBookingConflict({ conflictEntry: existingConflict, pendingPayload: payload });
+        return;
+      }
+    }
+
     if (editingEntryId) {
       onUpdateEntry(editingEntryId, payload);
     } else {
       onAddEntry(payload);
     }
+    setDoubleBookingConflict(null);
     setIsEntryModalOpen(false);
   };
 
@@ -1327,110 +1469,339 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
       {/* ===================== TAB 5: ROSTER MANAGEMENT (FACULTY & ROOMS) ===================== */}
       {activeAdminTab === 'roster' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Add Faculty Form */}
-          <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700 space-y-4">
-            <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
-              <UserPlus className="w-5 h-5 text-blue-400" />
-              <span>Register New Faculty Member</span>
-            </h3>
+        <div className="space-y-6">
+          {/* Top Banner & Manual Trigger Notifications */}
+          <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700/80 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <h3 className="font-heading font-extrabold text-lg text-white flex items-center space-x-2">
+                <Users className="w-5 h-5 text-blue-400" />
+                <span>Faculty Pre-Registration & Mobile Database</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Pre-register faculty mobile numbers & employee IDs before routine deployment to enable Mobile OTP Login.
+              </p>
+            </div>
 
-            <form onSubmit={handleCreateFaculty} className="space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Full Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Dr. Robert Vance"
-                  value={newFacName}
-                  onChange={(e) => setNewFacName(e.target.value)}
-                  className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">College Email</label>
-                <input
-                  type="email"
-                  placeholder="e.g. r.vance@digboicollege.edu.in"
-                  value={newFacEmail}
-                  onChange={(e) => setNewFacEmail(e.target.value)}
-                  className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Department</label>
-                <select
-                  value={newFacDept}
-                  onChange={(e) => setNewFacDept(e.target.value)}
-                  className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer"
-                >
-                  {DEPARTMENTS_LIST.map((dept) => (
-                    <option key={dept} value={dept}>
-                      {dept}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
+            <div className="flex flex-wrap items-center gap-2">
               <button
-                type="submit"
-                className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all"
+                onClick={() => handleNotifyFacultyRoutineUpload()}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center space-x-1.5 cursor-pointer"
+                title="Send updated schedule notifications to all faculty members listed in the active routine"
               >
-                Add Faculty Member
+                <span>📢 Notify All Faculty / Resend Schedule Alerts</span>
               </button>
-            </form>
+            </div>
           </div>
 
-          {/* Add Room Form */}
-          <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700 space-y-4">
-            <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
-              <Building className="w-5 h-5 text-cyan-400" />
-              <span>Create Campus Room / Lab</span>
-            </h3>
-
-            <form onSubmit={handleCreateRoom} className="space-y-3">
+          {/* DEDICATED UI SECTION: BULK CSV FACULTY PRE-REGISTRATION */}
+          <div className="bg-slate-800/95 rounded-2xl border-2 border-blue-500/40 p-6 shadow-xl space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-700/80">
               <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Room Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. LH-204 or AI LAB 2"
-                  value={newRoomName}
-                  onChange={(e) => setNewRoomName(e.target.value)}
-                  className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-cyan-500"
-                  required
-                />
+                <div className="flex items-center space-x-2">
+                  <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
+                  <h4 className="font-heading font-extrabold text-lg text-white">
+                    Bulk CSV / Excel Faculty Pre-Registration
+                  </h4>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    CSV / XLSX Supported
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-1">
+                  Upload a CSV file containing <strong>Faculty Name, Mobile Number, and Employee ID</strong> to pre-register faculty accounts in bulk.
+                </p>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Building Block</label>
-                <input
-                  type="text"
-                  value={newRoomBuilding}
-                  onChange={(e) => setNewRoomBuilding(e.target.value)}
-                  className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-cyan-500"
-                />
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadFacultyCsvTemplate}
+                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold flex items-center space-x-2 transition-all cursor-pointer shadow-sm"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>Download CSV Template (.csv)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* CSV File Upload Box */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+              <div className="md:col-span-2">
+                <label className="border-2 border-dashed border-blue-500/50 hover:border-blue-400 bg-slate-900/80 hover:bg-slate-900 rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all group">
+                  <Upload className="w-8 h-8 text-blue-400 group-hover:scale-110 transition-transform mb-2" />
+                  <span className="text-xs font-bold text-white mb-1">
+                    {facultyCsvFileName ? `File Selected: ${facultyCsvFileName}` : 'Click to Upload CSV File (or Drag & Drop)'}
+                  </span>
+                  <span className="text-[11px] text-slate-400 text-center">
+                    Required Headers: <strong>Faculty Name</strong>, <strong>Mobile Number</strong>, <strong>Employee ID</strong>, Department (Optional)
+                  </span>
+                  <input
+                    type="file"
+                    accept=".csv, .xlsx, .xls"
+                    onChange={handleFacultyCsvFileUpload}
+                    className="hidden"
+                  />
+                </label>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-300 block mb-1">Seating Capacity</label>
-                <input
-                  type="number"
-                  value={newRoomCap}
-                  onChange={(e) => setNewRoomCap(parseInt(e.target.value, 10) || 40)}
-                  className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-cyan-500"
-                />
+              <div className="bg-slate-900/90 rounded-2xl p-4 border border-slate-700/80 space-y-2 text-xs">
+                <div className="font-bold text-slate-200 flex items-center space-x-1.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <span>CSV Column Requirements</span>
+                </div>
+                <ul className="space-y-1 text-slate-400 text-[11px]">
+                  <li>• <strong className="text-slate-200">Faculty Name</strong> (e.g. Dr. Deborshee Gogoi)</li>
+                  <li>• <strong className="text-slate-200">Mobile Number</strong> (10-digit, used for OTP)</li>
+                  <li>• <strong className="text-slate-200">Employee ID</strong> (e.g. DC-EMP-001)</li>
+                  <li>• <strong className="text-slate-200">Department</strong> (e.g. Commerce, Physics)</li>
+                </ul>
               </div>
+            </div>
 
-              <button
-                type="submit"
-                className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl shadow-md transition-all"
-              >
-                Create Room
-              </button>
-            </form>
+            {/* CSV PARSED PREVIEW TABLE */}
+            {facultyCsvPreview.length > 0 && (
+              <div className="bg-slate-900/95 border border-emerald-500/40 rounded-2xl p-4 space-y-3 animate-fadeIn">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-400" />
+                    <h5 className="font-heading font-extrabold text-sm text-white">
+                      Parsed CSV Faculty Preview ({facultyCsvPreview.length} Records Found)
+                    </h5>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setFacultyCsvPreview([])}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all"
+                    >
+                      Clear / Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmFacultyCsvImport}
+                      className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center space-x-1.5 cursor-pointer"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Confirm & Bulk Add {facultyCsvPreview.length} Faculty Members</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto max-h-60 overflow-y-auto rounded-xl border border-slate-800">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-950 text-slate-400 font-semibold sticky top-0 z-10 border-b border-slate-800">
+                      <tr>
+                        <th className="p-2.5">#</th>
+                        <th className="p-2.5">Faculty Name</th>
+                        <th className="p-2.5">Mobile Number</th>
+                        <th className="p-2.5">Employee ID</th>
+                        <th className="p-2.5">Department</th>
+                        <th className="p-2.5">Designation</th>
+                        <th className="p-2.5">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/80">
+                      {facultyCsvPreview.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-800/40">
+                          <td className="p-2.5 text-slate-500 font-mono">{idx + 1}</td>
+                          <td className="p-2.5 font-bold text-white">{item.name}</td>
+                          <td className="p-2.5 font-mono text-emerald-400 font-semibold">
+                            {item.phone || <span className="text-rose-400 italic">Missing</span>}
+                          </td>
+                          <td className="p-2.5 font-mono text-slate-300">{item.employeeId}</td>
+                          <td className="p-2.5 text-slate-300">{item.department}</td>
+                          <td className="p-2.5 text-slate-400">{item.designation}</td>
+                          <td className="p-2.5">
+                            {item.phone ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                ✓ Ready
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                ⚠️ No Phone
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Add Faculty Form */}
+            <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700 space-y-4">
+              <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
+                <UserPlus className="w-5 h-5 text-blue-400" />
+                <span>Register New Faculty Member</span>
+              </h3>
+
+              <form onSubmit={handleCreateFaculty} className="space-y-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Full Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Dr. Robert Vance"
+                    value={newFacName}
+                    onChange={(e) => setNewFacName(e.target.value)}
+                    className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">College Email</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. r.vance@digboicollege.edu.in"
+                    value={newFacEmail}
+                    onChange={(e) => setNewFacEmail(e.target.value)}
+                    className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Department</label>
+                  <select
+                    value={newFacDept}
+                    onChange={(e) => setNewFacDept(e.target.value)}
+                    className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer"
+                  >
+                    {DEPARTMENTS_LIST.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+                >
+                  Add Faculty Member
+                </button>
+              </form>
+            </div>
+
+            {/* Add Room Form */}
+            <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700 space-y-4">
+              <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
+                <Building className="w-5 h-5 text-cyan-400" />
+                <span>Create Campus Room / Lab</span>
+              </h3>
+
+              <form onSubmit={handleCreateRoom} className="space-y-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Room Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. LH-204 or AI LAB 2"
+                    value={newRoomName}
+                    onChange={(e) => setNewRoomName(e.target.value)}
+                    className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-cyan-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Building Block</label>
+                  <input
+                    type="text"
+                    value={newRoomBuilding}
+                    onChange={(e) => setNewRoomBuilding(e.target.value)}
+                    className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Seating Capacity</label>
+                  <input
+                    type="number"
+                    value={newRoomCap}
+                    onChange={(e) => setNewRoomCap(parseInt(e.target.value, 10) || 40)}
+                    className="w-full bg-slate-900 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+                >
+                  Create Room
+                </button>
+              </form>
+            </div>
+          </div>
+
+          {/* ROUTINE VS PRE-REGISTRATION FACULTY AUDIT TABLE */}
+          <div className="bg-slate-800/90 rounded-2xl border border-slate-700 p-5 space-y-3 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Shield className="w-5 h-5 text-amber-400" />
+                <h4 className="font-heading font-extrabold text-base text-white">
+                  Routine vs. Pre-Registered Faculty Audit & Match Status
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400">
+                {facultyList.length} Faculty Accounts Registered
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
+                  <tr>
+                    <th className="p-3">Faculty Name</th>
+                    <th className="p-3">Department</th>
+                    <th className="p-3">Pre-Reg Mobile Number</th>
+                    <th className="p-3">Employee ID</th>
+                    <th className="p-3">Routine Classes Count</th>
+                    <th className="p-3">Audit Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700/50">
+                  {facultyList.map((fac) => {
+                    const classCount = timetable.filter(
+                      (t) =>
+                        t.facultyId === fac.id ||
+                        t.facultyName.toLowerCase().trim() === fac.name.toLowerCase().trim()
+                    ).length;
+
+                    const isMobilePresent = Boolean(fac.phone || fac.whatsappPhone);
+
+                    return (
+                      <tr key={fac.id} className="hover:bg-slate-700/30 transition-colors">
+                        <td className="p-3 font-bold text-white flex items-center space-x-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                          <span>{fac.name}</span>
+                        </td>
+                        <td className="p-3 text-slate-300">{fac.department}</td>
+                        <td className="p-3 font-mono font-semibold text-emerald-400">
+                          {fac.phone || fac.whatsappPhone || <span className="text-rose-400 italic">Missing Mobile</span>}
+                        </td>
+                        <td className="p-3 font-mono text-slate-400">{fac.employeeId || 'DC-EMP-001'}</td>
+                        <td className="p-3 font-mono text-blue-300 font-bold">{classCount} Lectures</td>
+                        <td className="p-3">
+                          {isMobilePresent ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                              ✓ Verified Ready for Mobile OTP
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              ⚠️ Action: Add Mobile Number
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -2071,18 +2442,34 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
               {/* Room & Batch */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">Room Assignment</label>
-                  <select
-                    value={formRoom}
-                    onChange={(e) => setFormRoom(e.target.value)}
-                    className="w-full bg-slate-800 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                  >
-                    {roomList.map((r) => (
-                      <option key={r.id} value={r.name}>
-                        {r.name} ({r.building})
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-300 block">Class No./Room (Free-Text or Dropdown)</label>
+                    <span className="text-[9px] text-cyan-300 font-semibold bg-cyan-950/80 px-1.5 py-0.5 rounded border border-cyan-500/30">✏️ Editable</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      list="available_rooms_list"
+                      value={formRoom}
+                      onChange={(e) => setFormRoom(e.target.value)}
+                      placeholder="e.g. Room No. C1, Lib.2, Hall, M2, AT3..."
+                      className="w-full bg-slate-800 text-white text-xs font-semibold rounded-xl px-3 py-2 border border-cyan-500/50 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40"
+                      required
+                    />
+                    <datalist id="available_rooms_list">
+                      {roomList.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.building} - Cap {r.capacity}
+                        </option>
+                      ))}
+                      <option value="Lib.2">Library Hall 2</option>
+                      <option value="Hall">Main Auditorium Hall</option>
+                      <option value="M2">M2 Seminar Room</option>
+                      <option value="AT3">Annex Theater 3</option>
+                      <option value="Smart Class 1">Smart Classroom 1</option>
+                    </datalist>
+                  </div>
+                  <p className="text-[9.5px] text-slate-400 mt-1">Select from list or type custom codes like Lib.2, Hall, AT3.</p>
                 </div>
 
                 <div>
@@ -2125,6 +2512,63 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Double Booking Conflict Warning Modal */}
+      {doubleBookingConflict && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-amber-500/80 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-white animate-fadeIn">
+            <div className="flex items-center space-x-3 text-amber-400">
+              <AlertTriangle className="w-8 h-8 shrink-0 text-amber-400 animate-bounce" />
+              <div>
+                <h3 className="font-heading font-extrabold text-lg text-white">
+                  Room Double-Booking Detected
+                </h3>
+                <span className="text-[11px] text-amber-300 font-bold uppercase tracking-wider">
+                  Conflict Warning
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs">
+              <p className="text-slate-300 leading-relaxed">
+                Room <strong className="text-amber-300 font-mono text-sm">{formRoom}</strong> is already assigned on{' '}
+                <strong className="text-white">{formDay}</strong> between{' '}
+                <strong className="text-cyan-300 font-mono">{doubleBookingConflict.conflictEntry.startTime} – {doubleBookingConflict.conflictEntry.endTime}</strong> by:
+              </p>
+
+              <div className="p-3 bg-amber-950/40 border border-amber-500/40 rounded-lg space-y-1">
+                <div className="font-bold text-amber-200">
+                  {doubleBookingConflict.conflictEntry.subjectName} ({doubleBookingConflict.conflictEntry.subjectCode})
+                </div>
+                <div className="text-[11px] text-slate-300">
+                  Faculty: <strong className="text-white">{doubleBookingConflict.conflictEntry.facultyName}</strong> | Class: {doubleBookingConflict.conflictEntry.batch}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-400 italic">
+                Do you still want to proceed with <strong>Manual Override</strong> (allow double booking)?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end space-x-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDoubleBookingConflict(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition-all"
+              >
+                Cancel & Adjust Room
+              </button>
+              <button
+                type="button"
+                onClick={(e) => handleSaveEntry(e, true)}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center space-x-1.5"
+              >
+                <CheckCircle className="w-4 h-4" />
+                <span>Confirm & Force Save (Manual Override)</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

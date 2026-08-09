@@ -10,6 +10,7 @@ export interface Faculty {
   designation: string;
   phone?: string;
   whatsappPhone?: string;
+  employeeId?: string;
   avatarUrl?: string;
   isVerified?: boolean;
 }
@@ -50,9 +51,22 @@ export interface User {
   role: Role;
   facultyId?: string;
   department: string;
+  phone?: string;
   whatsappPhone?: string;
+  employeeId?: string;
   isVerified?: boolean;
   isAcademicCoordinator?: boolean;
+}
+
+export interface FacultyNotification {
+  id: string;
+  facultyId?: string;
+  facultyName: string;
+  semesterTerm: string;
+  timestamp: string;
+  message: string;
+  totalClasses: number;
+  read?: boolean;
 }
 
 export interface AlertNotification {
