@@ -180,9 +180,9 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
           endTime: data.endTime || '',
           batch: data.batch || '',
           department: data.department || '',
-          semesterCycle: data.semesterCycle,
-          programSemester: data.programSemester,
-          paperCategory: data.paperCategory,
+          semesterCycle: data.semesterCycle || 'Odd',
+          programSemester: data.programSemester || 'FYUGP 1st Semester',
+          paperCategory: data.paperCategory || 'Major',
           notes: data.notes || '',
           isSubstitute: data.isSubstitute || false,
         });
@@ -231,11 +231,11 @@ export async function saveTimetableToFirestore(
         endTime: entry.endTime || '10:15',
         batch: entry.batch || 'FYUGP',
         department: entry.department || 'Commerce',
-        ...(entry.semesterCycle ? { semesterCycle: entry.semesterCycle } : {}),
-        ...(entry.programSemester ? { programSemester: entry.programSemester } : {}),
-        ...(entry.paperCategory ? { paperCategory: entry.paperCategory } : {}),
-        ...(entry.notes ? { notes: entry.notes } : {}),
-        ...(entry.isSubstitute ? { isSubstitute: entry.isSubstitute } : {}),
+        semesterCycle: entry.semesterCycle || 'Odd',
+        programSemester: entry.programSemester || 'FYUGP 1st Semester',
+        paperCategory: entry.paperCategory || 'Major',
+        notes: entry.notes || '',
+        isSubstitute: entry.isSubstitute || false,
       };
 
       return setDoc(docRef, {

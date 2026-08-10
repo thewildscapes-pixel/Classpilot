@@ -271,7 +271,11 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setTimetable((prev) => (prev.length > 0 ? prev : data));
+          setTimetable((prev) => {
+            const hasLocal = localStorage.getItem('classpilot_timetable') !== null;
+            if (hasLocal && prev.length > 0) return prev;
+            return data;
+          });
         }
       })
       .catch((err) => console.log('Loaded default timetable state'));
@@ -280,7 +284,11 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setFacultyList(data);
+          setFacultyList((prev) => {
+            const hasLocal = localStorage.getItem('classpilot_faculty_list') !== null;
+            if (hasLocal && prev.length > 0) return prev;
+            return data;
+          });
         }
       })
       .catch((err) => console.log('Loaded default faculty state'));
@@ -289,7 +297,11 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setRoomList(data);
+          setRoomList((prev) => {
+            const hasLocal = localStorage.getItem('classpilot_room_list') !== null;
+            if (hasLocal && prev.length > 0) return prev;
+            return data;
+          });
         }
       })
       .catch((err) => console.log('Loaded default room state'));
@@ -527,7 +539,13 @@ export default function App() {
   };
 
   const handleDeleteEntry = async (id: string) => {
-    setTimetable((prev) => prev.filter((t) => t.id !== id));
+    setTimetable((prev) => {
+      const updated = prev.filter((t) => t.id !== id);
+      try {
+        localStorage.setItem('classpilot_timetable', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
     await deleteTimetableEntryFromFirestore(id);
 
     try {
@@ -555,7 +573,11 @@ export default function App() {
       endTime: e.endTime || '10:15',
       batch: e.batch || 'FYUGP',
       department: e.department || 'Commerce',
+      semesterCycle: e.semesterCycle || 'Odd',
+      programSemester: e.programSemester || 'FYUGP 1st Semester',
+      paperCategory: e.paperCategory || 'Major',
       notes: e.notes || '',
+      isSubstitute: e.isSubstitute || false,
     }));
 
     // 2. Pre-Import Backup of current routine if replacing existing data
@@ -907,6 +929,7 @@ export default function App() {
               setSelectedClassForDiary(entry);
               setActiveTab('diary');
             }}
+            students={students}
           />
         )}
 

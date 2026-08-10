@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TimetableEntry, Faculty, DayOfWeek, User } from '../types';
+import { TimetableEntry, Faculty, DayOfWeek, User, Student } from '../types';
 import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName } from '../utils/timeUtils';
 import {
   Calendar,
@@ -21,6 +21,7 @@ import {
   Zap,
   Check,
   X,
+  UserCheck,
 } from 'lucide-react';
 
 interface FacultyScheduleProps {
@@ -34,6 +35,7 @@ interface FacultyScheduleProps {
   onTriggerAlert: (entry: TimetableEntry) => void;
   currentUser: User;
   onNavigateToDiary?: (entry: TimetableEntry) => void;
+  students?: Student[];
 }
 
 interface FreePeriodItem {
@@ -46,6 +48,38 @@ interface FreePeriodItem {
 
 type TimelineItem = (TimetableEntry & { isFreePeriod?: false }) | FreePeriodItem;
 
+// Helper to count enrolled students matching a timetable entry's batch / department
+const getEnrolledStudentCount = (entry: TimetableEntry, studentsList: Student[] = []): number => {
+  if (!studentsList || studentsList.length === 0) return 0;
+
+  const b = (entry.batch || '').toLowerCase().trim();
+  const ps = (entry.programSemester || '').toLowerCase().trim();
+  const d = (entry.department || '').toLowerCase().trim();
+
+  const matched = studentsList.filter((s) => {
+    const sb = (s.classBatch || '').toLowerCase().trim();
+    if (!sb) return false;
+
+    if (sb === b || sb === ps) return true;
+    if (b && (sb.includes(b) || b.includes(sb))) return true;
+    if (ps && (sb.includes(ps) || ps.includes(sb))) return true;
+
+    const entryTokens = `${b} ${ps} ${d}`.split(/[\s\-_,]+/).filter((t) => t.length > 2);
+    const studentTokens = sb.split(/[\s\-_,]+/).filter((t) => t.length > 2);
+    const shared = entryTokens.filter((tok) => studentTokens.includes(tok));
+    return shared.length >= 2;
+  });
+
+  if (matched.length > 0) return matched.length;
+
+  const deptMatched = studentsList.filter((s) => {
+    const sb = (s.classBatch || '').toLowerCase().trim();
+    return d && d.length > 2 && sb.includes(d);
+  });
+
+  return deptMatched.length;
+};
+
 export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   timetable,
   facultyList,
@@ -57,6 +91,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   onTriggerAlert,
   currentUser,
   onNavigateToDiary,
+  students = [],
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
@@ -441,6 +476,11 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                       <Users className="w-3.5 h-3.5 text-slate-400" />
                       <span>Class: {highlightClass.batch}</span>
                     </span>
+
+                    <span className="flex items-center space-x-1.5 text-indigo-200 font-bold bg-indigo-950/80 px-2.5 py-0.5 rounded-md border border-indigo-500/50 shadow-sm" title={`${getEnrolledStudentCount(highlightClass, students)} students enrolled in this class batch`}>
+                      <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>{getEnrolledStudentCount(highlightClass, students)} Students Enrolled</span>
+                    </span>
                   </div>
                 </div>
 
@@ -625,6 +665,11 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                             <BookOpen className="w-3.5 h-3.5 text-slate-400" />
                             <span>Dept: {entry.department}</span>
                           </span>
+
+                          <span className="flex items-center space-x-1.5 bg-indigo-950/80 px-2.5 py-1 rounded-lg border border-indigo-500/40 text-indigo-300 font-bold shadow-sm" title={`${getEnrolledStudentCount(entry, students)} students registered in this batch`}>
+                            <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>{getEnrolledStudentCount(entry, students)} Enrolled</span>
+                          </span>
                         </div>
                       </div>
 
@@ -806,6 +851,15 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                               <span className="text-slate-400 font-medium">
                                 {entry.batch}
                               </span>
+                            </div>
+
+                            {/* Enrolled Students Badge */}
+                            <div className="flex items-center justify-between text-[10px] bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-500/30 text-indigo-300 font-semibold">
+                              <span className="flex items-center space-x-1">
+                                <UserCheck className="w-3 h-3 text-indigo-400" />
+                                <span>Enrolled:</span>
+                              </span>
+                              <span className="font-extrabold text-indigo-200">{getEnrolledStudentCount(entry, students)} Students</span>
                             </div>
 
                             {/* Direct Fill Class Diary or Alert */}

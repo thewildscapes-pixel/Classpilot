@@ -166,7 +166,14 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       const res = await fetch('/api/class-diary');
       if (res.ok) {
         const data = await res.json();
-        setDiaryEntries(data);
+        if (Array.isArray(data) && data.length > 0) {
+          setDiaryEntries(data);
+          try {
+            localStorage.setItem('classpilot_class_diary', JSON.stringify(data));
+          } catch (e) {}
+        } else {
+          loadLocalDiaryEntries();
+        }
       } else {
         // Fallback to local dataset
         loadLocalDiaryEntries();

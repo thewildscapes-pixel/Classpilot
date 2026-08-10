@@ -62,7 +62,16 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
   timetable,
   onTriggerAlarm,
 }) => {
-  const [events, setEvents] = useState<CalendarEvent[]>(DEFAULT_EVENTS);
+  const [events, setEvents] = useState<CalendarEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('classpilot_calendar_events');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return DEFAULT_EVENTS;
+  });
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [isConnected, setIsConnected] = useState<boolean>(true);
@@ -86,6 +95,9 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
           setEvents(data);
+          try {
+            localStorage.setItem('classpilot_calendar_events', JSON.stringify(data));
+          } catch (e) {}
         }
       }
     } catch (e) {
@@ -109,20 +121,22 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
       createdById: currentUser.facultyId || 'fac_1',
     };
 
+    setEvents((prev) => {
+      const updated = [newEvent, ...prev];
+      try {
+        localStorage.setItem('classpilot_calendar_events', JSON.stringify(updated));
+      } catch (err) {}
+      return updated;
+    });
+
     try {
-      const res = await fetch('/api/calendar/events', {
+      await fetch('/api/calendar/events', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newEvent),
       });
-
-      if (res.ok) {
-        fetchCalendarEvents();
-      } else {
-        setEvents((prev) => [newEvent, ...prev]);
-      }
-    } catch (err) {
-      setEvents((prev) => [newEvent, ...prev]);
+    } catch (e) {
+      console.warn('Backend sync failed, saved locally');
     }
 
     setIsModalOpen(false);

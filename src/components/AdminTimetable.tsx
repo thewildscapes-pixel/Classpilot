@@ -47,6 +47,9 @@ import {
   Sparkles,
   Send,
   ArrowRight,
+  GripVertical,
+  Move,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface AdminTimetableProps {
@@ -493,6 +496,17 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [conflictDeptFilter, setConflictDeptFilter] = useState<string>('All');
   const [resolutionNotice, setResolutionNotice] = useState<{ title: string; message: string; type: 'success' | 'info' } | null>(null);
 
+  // Quick Reschedule Drag & Drop States
+  const [draggedEntry, setDraggedEntry] = useState<TimetableEntry | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<{ day: DayOfWeek; startTime: string; endTime: string } | null>(null);
+  const [rescheduleConflictModal, setRescheduleConflictModal] = useState<{
+    entry: TimetableEntry;
+    targetDay: DayOfWeek;
+    targetStartTime: string;
+    targetEndTime: string;
+    conflicts: ScheduleConflict[];
+  } | null>(null);
+
   // Helper: Find empty available rooms for a given slot
   const getAvailableRoomsForSlot = (day: DayOfWeek, startTime: string, endTime: string, currentRoomName?: string) => {
     const sMin = parseTimeToMinutes(startTime);
@@ -642,6 +656,100 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       message: `Automatically reassigned ${count} conflicting room allocation(s) to vacant campus classrooms!`,
       type: 'success',
     });
+  };
+
+  // Quick Reschedule Drag and Drop Handlers
+  const handleDragStart = (e: React.DragEvent, entry: TimetableEntry) => {
+    setDraggedEntry(entry);
+    e.dataTransfer.setData('text/plain', entry.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOverCell = (e: React.DragEvent, day: DayOfWeek, startTime: string, endTime: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (!dragOverSlot || dragOverSlot.day !== day || dragOverSlot.startTime !== startTime) {
+      setDragOverSlot({ day, startTime, endTime });
+    }
+  };
+
+  const handleDragLeaveCell = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDragOverSlot(null);
+    }
+  };
+
+  const handleDropOnSlot = (e: React.DragEvent, targetDay: DayOfWeek, targetStartTime: string, targetEndTime: string) => {
+    e.preventDefault();
+    setDragOverSlot(null);
+
+    const entryId = e.dataTransfer.getData('text/plain') || draggedEntry?.id;
+    if (!entryId) return;
+
+    const entryToMove = timetable.find((t) => t.id === entryId) || draggedEntry;
+    if (!entryToMove) return;
+
+    // Check if dropping on exact same day and start time
+    if (entryToMove.day === targetDay && entryToMove.startTime === targetStartTime) {
+      setDraggedEntry(null);
+      return;
+    }
+
+    // Preserve original duration of class if it spans 1 or more hours
+    const origStart = parseTimeToMinutes(entryToMove.startTime);
+    const origEnd = parseTimeToMinutes(entryToMove.endTime);
+    const duration = Math.max(60, origEnd - origStart || 60);
+
+    const targetStartMin = parseTimeToMinutes(targetStartTime);
+    const targetEndMin = targetStartMin + duration;
+    const calcHours = Math.floor(targetEndMin / 60);
+    const calcMins = targetEndMin % 60;
+    const formattedEnd = `${calcHours < 10 ? '0' + calcHours : calcHours}:${calcMins < 10 ? '0' + calcMins : calcMins}`;
+
+    const newStart = targetStartTime;
+    const newEnd = formattedEnd;
+
+    // Build simulated timetable
+    const updatedHypothetical: TimetableEntry = {
+      ...entryToMove,
+      day: targetDay,
+      startTime: newStart,
+      endTime: newEnd,
+    };
+
+    const simulatedTimetable = timetable.map((t) =>
+      t.id === entryToMove.id ? updatedHypothetical : t
+    );
+
+    // Run detectConflicts on the hypothetical state
+    const allConflicts = detectConflicts(simulatedTimetable);
+    const entryConflicts = allConflicts.filter(
+      (c) => c.entry1.id === entryToMove.id || c.entry2.id === entryToMove.id
+    );
+
+    if (entryConflicts.length > 0) {
+      setRescheduleConflictModal({
+        entry: entryToMove,
+        targetDay,
+        targetStartTime: newStart,
+        targetEndTime: newEnd,
+        conflicts: entryConflicts,
+      });
+    } else {
+      onUpdateEntry(entryToMove.id, {
+        day: targetDay,
+        startTime: newStart,
+        endTime: newEnd,
+      });
+
+      setResolutionNotice({
+        title: '⚡ Quick Rescheduled Successfully!',
+        message: `Moved "${entryToMove.subjectName}" (${entryToMove.subjectCode}) for ${entryToMove.facultyName} to ${targetDay} [${newStart} - ${newEnd}]. Automated conflict check passed with 0 clashes!`,
+        type: 'success',
+      });
+    }
+
+    setDraggedEntry(null);
   };
 
   // Active departments present
@@ -943,7 +1051,19 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       );
       return; // Do NOT reset form state on write failure
     }
-    alert(`✅ Routine Uploaded & Persisted to Firestore Database!\n\n${parsedPreviewEntries.length} class periods saved. Version history log and raw file retained.`);
+    
+    // Auto-reset filters so all imported routine entries are immediately visible
+    setSelectedDepartment('All');
+    setSelectedProgramSemester('All');
+    setFilterDay('All');
+    setSearchTerm('');
+
+    setResolutionNotice({
+      title: '✅ Routine Spreadsheet Uploaded & Stored!',
+      message: `Successfully stored ${parsedPreviewEntries.length} class schedule periods in the active routine database & Firestore. Version history generated.`,
+      type: 'success',
+    });
+
     handleNotifyFacultyRoutineUpload(parsedPreviewEntries);
     setParsedPreviewEntries([]);
     setImportFileName('');
@@ -1042,6 +1162,22 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     } else {
       onAddEntry(payload);
     }
+
+    // Auto-align filters so newly saved entry is 100% visible on screen immediately
+    if (payload.semesterCycle) {
+      setActiveSemesterCycle(payload.semesterCycle);
+    }
+    setSelectedDepartment('All');
+    setSelectedProgramSemester('All');
+    setFilterDay('All');
+    setSearchTerm('');
+
+    setResolutionNotice({
+      title: '✅ Routine Entry Saved to Database!',
+      message: `Class period "${payload.subjectName}" (${payload.subjectCode}) for ${payload.facultyName} on ${payload.day} [${payload.startTime} - ${payload.endTime}] in ${payload.room} was successfully saved and synced to Firestore.`,
+      type: 'success',
+    });
+
     setDoubleBookingConflict(null);
     setIsEntryModalOpen(false);
   };
@@ -1335,6 +1471,33 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         </div>
       </div>
 
+      {/* Active Filter Notification Banner */}
+      {filteredList.length < timetable.length && (
+        <div className="bg-amber-950/70 border border-amber-500/60 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-amber-200 shadow-lg">
+          <div className="flex items-center space-x-2">
+            <Filter className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              Active Filter: Showing <strong>{filteredList.length}</strong> of <strong>{timetable.length}</strong> total routine entries in the system.
+              {selectedDepartment !== 'All' && <span className="ml-1 text-amber-300 font-semibold">• Dept: {selectedDepartment}</span>}
+              {selectedProgramSemester !== 'All' && <span className="ml-1 text-amber-300 font-semibold">• Semester: {selectedProgramSemester}</span>}
+              {filterDay !== 'All' && <span className="ml-1 text-amber-300 font-semibold">• Day: {filterDay}</span>}
+              {searchTerm && <span className="ml-1 text-amber-300 font-semibold">• Search: "{searchTerm}"</span>}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setSelectedDepartment('All');
+              setSelectedProgramSemester('All');
+              setFilterDay('All');
+              setSearchTerm('');
+            }}
+            className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold rounded-lg border border-amber-500/40 text-[11px] shrink-0 transition-all cursor-pointer"
+          >
+            Show All {timetable.length} Classes
+          </button>
+        </div>
+      )}
+
       {/* ===================== TAB 0: WEEKLY ROUTINE GRID TABLE MATRIX ===================== */}
       {activeAdminTab === 'grid' && (
         <div className="space-y-4">
@@ -1342,13 +1505,18 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             <div className="flex items-center space-x-2">
               <Clock className="w-5 h-5 text-indigo-400" />
               <div>
-                <h3 className="font-heading font-bold text-base text-white">
-                  1-Hour Class Schedule Table (08:00 AM – 04:00 PM)
+                <h3 className="font-heading font-bold text-base text-white flex items-center gap-2">
+                  <span>1-Hour Class Schedule Table (08:00 AM – 04:00 PM)</span>
+                  <span className="bg-indigo-950 text-indigo-300 border border-indigo-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
+                    <Move className="w-3 h-3 text-indigo-400" />
+                    <span>Quick Reschedule Enabled</span>
+                  </span>
                 </h3>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-400 mt-0.5">
                   Active Cycle: <span className="font-bold text-emerald-400">{activeSemesterCycle} Semesters</span>
                   {selectedDepartment !== 'All' && <span> • Dept: <span className="text-indigo-300">{selectedDepartment}</span></span>}
                   {selectedProgramSemester !== 'All' && <span> • Program: <span className="text-amber-300">{selectedProgramSemester}</span></span>}
+                  <span className="ml-2 text-indigo-300 font-semibold">• Drag any class card to a slot to reschedule automatically with conflict checking</span>
                 </p>
               </div>
             </div>
@@ -1356,7 +1524,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => openAddModalForSlot()}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 transition-all"
+                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>+ Add Class Entry</span>
@@ -1365,7 +1533,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
               <button
                 onClick={onResetData}
                 title="Reset to default dataset"
-                className="p-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all"
+                className="p-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
@@ -1414,34 +1582,62 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                           return eStartMin < slotEndMin && eEndMin > slotStartMin;
                         });
 
+                        const isTargetHover =
+                          dragOverSlot?.day === day && dragOverSlot?.startTime === slot.startTime;
+
                         return (
                           <td
                             key={slot.label}
-                            className="p-1.5 border-r border-slate-800/80 align-top hover:bg-slate-700/40 transition-colors"
+                            onDragOver={(e) => handleDragOverCell(e, day, slot.startTime, slot.endTime)}
+                            onDragLeave={handleDragLeaveCell}
+                            onDrop={(e) => handleDropOnSlot(e, day, slot.startTime, slot.endTime)}
+                            className={`p-1.5 border-r border-slate-800/80 align-top transition-all ${
+                              isTargetHover
+                                ? 'bg-indigo-500/25 border-2 border-indigo-400 border-dashed shadow-inner'
+                                : 'hover:bg-slate-700/40'
+                            }`}
                           >
                             {slotEntries.length === 0 ? (
                               <button
                                 onClick={() => openAddModalForSlot(day, slot.startTime, slot.endTime)}
-                                className="w-full h-full min-h-[70px] rounded-xl border border-dashed border-slate-700/60 hover:border-indigo-500/50 hover:bg-indigo-500/5 text-slate-500 hover:text-indigo-300 flex flex-col items-center justify-center p-1.5 transition-all group"
+                                className={`w-full h-full min-h-[70px] rounded-xl border border-dashed text-slate-500 hover:text-indigo-300 flex flex-col items-center justify-center p-1.5 transition-all group ${
+                                  isTargetHover
+                                    ? 'border-indigo-400 bg-indigo-500/20 text-indigo-200'
+                                    : 'border-slate-700/60 hover:border-indigo-500/50 hover:bg-indigo-500/5'
+                                }`}
                               >
                                 <Plus className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 mb-0.5" />
-                                <span className="text-[10px] font-semibold">Free Slot</span>
+                                <span className="text-[10px] font-semibold">
+                                  {isTargetHover ? 'Drop to Reschedule' : 'Free Slot'}
+                                </span>
                               </button>
                             ) : (
                               <div className="space-y-1.5">
                                 {slotEntries.map((entry) => (
                                   <div
                                     key={entry.id}
-                                    className="p-2 rounded-xl bg-slate-900 border border-slate-700 hover:border-indigo-500 shadow-md relative group transition-all"
+                                    draggable={true}
+                                    onDragStart={(e) => handleDragStart(e, entry)}
+                                    className={`p-2 rounded-xl bg-slate-900 border shadow-md relative group transition-all cursor-grab active:cursor-grabbing ${
+                                      draggedEntry?.id === entry.id
+                                        ? 'border-amber-400 opacity-40 scale-95'
+                                        : 'border-slate-700 hover:border-indigo-500'
+                                    }`}
                                   >
                                     <div className="flex items-center justify-between gap-1 mb-1">
-                                      <span
-                                        className={`px-1.5 py-0.2 rounded border font-bold text-[9px] uppercase tracking-wide ${getPaperBadgeColor(
-                                          entry.paperCategory
-                                        )}`}
-                                      >
-                                        {entry.paperCategory || 'Core'}
-                                      </span>
+                                      <div className="flex items-center space-x-1">
+                                        <GripVertical
+                                          className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 transition-colors shrink-0"
+                                          title="Drag class card to Quick Reschedule"
+                                        />
+                                        <span
+                                          className={`px-1.5 py-0.2 rounded border font-bold text-[9px] uppercase tracking-wide ${getPaperBadgeColor(
+                                            entry.paperCategory
+                                          )}`}
+                                        >
+                                          {entry.paperCategory || 'Core'}
+                                        </span>
+                                      </div>
                                       <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[9px]">
                                         {entry.room}
                                       </span>
@@ -4344,6 +4540,131 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Quick Reschedule Conflict Warning Modal */}
+      {rescheduleConflictModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-amber-500/80 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3 text-amber-400">
+                <div className="p-2 bg-amber-500/20 rounded-xl border border-amber-500/40">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-bold text-lg text-white">
+                    Quick Reschedule Conflict Warning
+                  </h3>
+                  <p className="text-xs text-amber-300">
+                    Automated conflict checker found {rescheduleConflictModal.conflicts.length} clash(es) for proposed move.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setRescheduleConflictModal(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Move Details */}
+            <div className="bg-slate-800/90 rounded-xl p-3 border border-slate-700/80 text-xs space-y-1">
+              <div className="font-bold text-white text-sm">
+                Class: {rescheduleConflictModal.entry.subjectName} ({rescheduleConflictModal.entry.subjectCode})
+              </div>
+              <div className="text-slate-300 flex items-center space-x-2">
+                <span>Faculty: <strong className="text-indigo-300">{rescheduleConflictModal.entry.facultyName}</strong></span>
+                <span>•</span>
+                <span>Room: <strong className="text-cyan-300">{rescheduleConflictModal.entry.room}</strong></span>
+              </div>
+              <div className="text-amber-300 font-semibold pt-1 border-t border-slate-700 flex items-center space-x-1">
+                <span>Proposed Slot:</span>
+                <span className="bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/40 font-mono">
+                  {rescheduleConflictModal.targetDay} [{rescheduleConflictModal.targetStartTime} - {rescheduleConflictModal.targetEndTime}]
+                </span>
+              </div>
+            </div>
+
+            {/* List of Conflicts */}
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {rescheduleConflictModal.conflicts.map((conf, idx) => (
+                <div key={idx} className="bg-rose-950/60 border border-rose-500/50 p-2.5 rounded-xl text-xs text-rose-200">
+                  <div className="font-bold text-rose-300 flex items-center space-x-1.5 mb-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                    <span className="capitalize">{conf.type} Double-Booking Conflict</span>
+                  </div>
+                  <p className="leading-relaxed">{conf.description}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={() => setRescheduleConflictModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel Reschedule
+              </button>
+              
+              {/* If there's a free room available for a room conflict, offer 1-click room reassign */}
+              {rescheduleConflictModal.conflicts.some((c) => c.type === 'room') && (
+                (() => {
+                  const freeRooms = getAvailableRoomsForSlot(
+                    rescheduleConflictModal.targetDay,
+                    rescheduleConflictModal.targetStartTime,
+                    rescheduleConflictModal.targetEndTime,
+                    rescheduleConflictModal.entry.room
+                  );
+                  if (freeRooms.length > 0) {
+                    return (
+                      <button
+                        onClick={() => {
+                          onUpdateEntry(rescheduleConflictModal.entry.id, {
+                            day: rescheduleConflictModal.targetDay,
+                            startTime: rescheduleConflictModal.targetStartTime,
+                            endTime: rescheduleConflictModal.targetEndTime,
+                            room: freeRooms[0],
+                          });
+                          setResolutionNotice({
+                            title: '✨ Rescheduled & Reassigned Room!',
+                            message: `Moved "${rescheduleConflictModal.entry.subjectName}" to ${rescheduleConflictModal.targetDay} and reassigned room to vacant room "${freeRooms[0]}".`,
+                            type: 'success',
+                          });
+                          setRescheduleConflictModal(null);
+                        }}
+                        className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
+                      >
+                        Reassign Room to {freeRooms[0]} & Reschedule
+                      </button>
+                    );
+                  }
+                  return null;
+                })()
+              )}
+
+              <button
+                onClick={() => {
+                  onUpdateEntry(rescheduleConflictModal.entry.id, {
+                    day: rescheduleConflictModal.targetDay,
+                    startTime: rescheduleConflictModal.targetStartTime,
+                    endTime: rescheduleConflictModal.targetEndTime,
+                  });
+                  setResolutionNotice({
+                    title: '⚠️ Rescheduled with Conflict Override',
+                    message: `Moved "${rescheduleConflictModal.entry.subjectName}" to ${rescheduleConflictModal.targetDay} [${rescheduleConflictModal.targetStartTime} - ${rescheduleConflictModal.targetEndTime}]. Overrode ${rescheduleConflictModal.conflicts.length} conflict(s).`,
+                    type: 'info',
+                  });
+                  setRescheduleConflictModal(null);
+                }}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
+              >
+                Force Reschedule
+              </button>
+            </div>
           </div>
         </div>
       )}

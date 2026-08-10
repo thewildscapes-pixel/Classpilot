@@ -10,8 +10,7 @@ import {
 import {
   getFirestore,
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
+  memoryLocalCache,
   doc,
   setDoc,
   getDoc,
@@ -53,7 +52,24 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with custom database ID and persistent local cache for offline support
+// Safely clean up any leftover corrupted firestore IndexedDB databases if browser site data was cleared
+if (typeof window !== 'undefined' && window.indexedDB) {
+  try {
+    if ('databases' in window.indexedDB && typeof window.indexedDB.databases === 'function') {
+      window.indexedDB.databases().then((dbs) => {
+        dbs.forEach((dbInfo) => {
+          if (dbInfo.name && dbInfo.name.toLowerCase().includes('firestore')) {
+            try {
+              window.indexedDB.deleteDatabase(dbInfo.name);
+            } catch (err) {}
+          }
+        });
+      }).catch(() => {});
+    }
+  } catch (err) {}
+}
+
+// Initialize Firestore with custom database ID and memoryLocalCache to prevent IndexedDB corruption issues
 const databaseId =
   firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
     ? firebaseConfig.firestoreDatabaseId
@@ -64,7 +80,7 @@ try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      localCache: memoryLocalCache(),
     },
     databaseId
   );

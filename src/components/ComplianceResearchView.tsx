@@ -47,7 +47,16 @@ const DEFAULT_RESEARCH: ResearchRecord[] = [
 ];
 
 export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ currentUser }) => {
-  const [researchList, setResearchList] = useState<ResearchRecord[]>(DEFAULT_RESEARCH);
+  const [researchList, setResearchList] = useState<ResearchRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('classpilot_research_records');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return DEFAULT_RESEARCH;
+  });
   const [activeTab, setActiveTab] = useState<'research' | 'naac_audit'>('research');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
@@ -71,6 +80,9 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
           setResearchList(data);
+          try {
+            localStorage.setItem('classpilot_research_records', JSON.stringify(data));
+          } catch (e) {}
         }
       }
     } catch (e) {
@@ -95,20 +107,22 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
       dateLogged: new Date().toISOString().split('T')[0],
     };
 
+    setResearchList((prev) => {
+      const updated = [newRecord, ...prev];
+      try {
+        localStorage.setItem('classpilot_research_records', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
     try {
-      const res = await fetch('/api/research', {
+      await fetch('/api/research', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newRecord),
       });
-
-      if (res.ok) {
-        fetchResearchRecords();
-      } else {
-        setResearchList((prev) => [newRecord, ...prev]);
-      }
     } catch (err) {
-      setResearchList((prev) => [newRecord, ...prev]);
+      console.warn('Backend research sync failed, saved locally.');
     }
 
     setIsModalOpen(false);
