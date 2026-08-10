@@ -100,6 +100,19 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const [jumpDate, setJumpDate] = useState<string>('');
   const [qrModalEntry, setQrModalEntry] = useState<TimetableEntry | null>(null);
 
+  // Normalize day helper for robust day comparison (e.g., 'Mon', 'MONDAY', 'Monday ')
+  const normalizeDay = (d: string = ''): string => {
+    const clean = d.trim().toLowerCase();
+    if (clean.startsWith('mon')) return 'Monday';
+    if (clean.startsWith('tue')) return 'Tuesday';
+    if (clean.startsWith('wed')) return 'Wednesday';
+    if (clean.startsWith('thu')) return 'Thursday';
+    if (clean.startsWith('fri')) return 'Friday';
+    if (clean.startsWith('sat')) return 'Saturday';
+    if (clean.startsWith('sun')) return 'Sunday';
+    return d.trim();
+  };
+
   // Determine current active faculty object
   const currentFaculty: Faculty =
     facultyList.find((f) => f.id === selectedFacultyId) ||
@@ -107,6 +120,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
       (f) =>
         currentUser &&
         (f.id === currentUser.facultyId ||
+          (f.email && currentUser.email && f.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
           isPhoneMatch(f.phone, currentUser.phone) ||
           isPhoneMatch(f.whatsappPhone, currentUser.phone) ||
           isPhoneMatch(f.phone, currentUser.whatsappPhone) ||
@@ -131,6 +145,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
       (selectedFacultyId === currentUser.facultyId ||
         (currentFaculty &&
           (currentFaculty.id === currentUser.facultyId ||
+            (currentFaculty.email && currentUser.email && currentFaculty.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
             isFacultyNameMatch(currentFaculty.name, currentUser.name))))
   );
 
@@ -148,24 +163,30 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
 
   // Filter timetable entries strictly for active target faculty
   const allFacultyEntries = timetable.filter((e) => {
-    // 1. Direct match with current active faculty object
+    // 1. Match by selectedFacultyId directly
+    if (selectedFacultyId && e.facultyId === selectedFacultyId) return true;
+
+    // 2. Direct match with current active faculty object
     if (currentFaculty) {
       if (e.facultyId && e.facultyId === currentFaculty.id) return true;
       if (e.facultyName && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
+      if (currentFaculty.email && e.facultyName && e.facultyName.toLowerCase().includes(currentFaculty.email.split('@')[0].toLowerCase())) return true;
     }
 
-    // 2. If viewing own schedule, also match currentUser properties
-    if (isViewingOwnSchedule && currentUser) {
+    // 3. Match with currentUser properties if logged in
+    if (currentUser) {
       if (currentUser.facultyId && e.facultyId === currentUser.facultyId) return true;
       if (currentUser.name && isFacultyNameMatch(e.facultyName, currentUser.name)) return true;
 
-      // Match via phone linkage in facultyList
+      // Match via phone / email linkage in facultyList
       const matchedFacInList = facultyList.find(
         (f) => f.id === e.facultyId || isFacultyNameMatch(f.name, e.facultyName)
       );
       if (
         matchedFacInList &&
-        (isPhoneMatch(matchedFacInList.phone, currentUser.phone) ||
+        (matchedFacInList.id === currentUser.facultyId ||
+          (matchedFacInList.email && currentUser.email && matchedFacInList.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
+          isPhoneMatch(matchedFacInList.phone, currentUser.phone) ||
           isPhoneMatch(matchedFacInList.whatsappPhone, currentUser.phone) ||
           isPhoneMatch(matchedFacInList.phone, currentUser.whatsappPhone) ||
           isFacultyNameMatch(matchedFacInList.name, currentUser.name))
@@ -177,9 +198,10 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     return false;
   });
 
-  // Filter single day entries
+  // Filter single day entries with normalized day comparison
+  const targetDayNorm = normalizeDay(selectedDay);
   const dayEntries = allFacultyEntries
-    .filter((e) => e.day === selectedDay)
+    .filter((e) => normalizeDay(e.day) === targetDayNorm)
     .filter((e) => {
       if (!searchTerm.trim()) return true;
       const q = searchTerm.toLowerCase();
@@ -195,7 +217,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   // --- HIGHLIGHT CURRENT / NEXT CLASS ENGINE ---
   const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes();
   const todayEntriesSorted = [...allFacultyEntries]
-    .filter((e) => e.day === selectedDay)
+    .filter((e) => normalizeDay(e.day) === targetDayNorm)
     .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
 
   const ongoingClass = todayEntriesSorted.find((e) => {
@@ -263,7 +285,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     let rowsHtml = '';
     DAYS_OF_WEEK.forEach((day) => {
       const entries = allFacultyEntries
-        .filter((e) => e.day === day)
+        .filter((e) => normalizeDay(e.day) === normalizeDay(day))
         .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
 
       const dayText =
@@ -458,7 +480,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
         {viewMode === 'daily' && (
           <div className="pt-3 border-t border-slate-700/60 flex items-center space-x-1.5 overflow-x-auto pb-1 scrollbar-thin">
             {DAYS_OF_WEEK.map((day) => {
-              const count = allFacultyEntries.filter((e) => e.day === day).length;
+              const count = allFacultyEntries.filter((e) => normalizeDay(e.day) === normalizeDay(day)).length;
               const isSelected = selectedDay === day;
 
               return (
@@ -817,7 +839,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             {DAYS_OF_WEEK.map((day) => {
               const entriesForDay = allFacultyEntries
-                .filter((e) => e.day === day)
+                .filter((e) => normalizeDay(e.day) === normalizeDay(day))
                 .filter((e) => {
                   if (!searchTerm.trim()) return true;
                   const q = searchTerm.toLowerCase();

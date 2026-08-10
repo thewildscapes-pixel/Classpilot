@@ -439,53 +439,62 @@ export default function App() {
       }
     });
 
-    fetch('/api/timetable')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setTimetable(data);
-          try {
-            localStorage.setItem('classpilot_timetable', JSON.stringify(data));
-          } catch (e) {}
-        }
-      })
-      .catch((err) => console.log('Loaded default timetable state'));
+    // Helper to fetch latest backend state periodically
+    const syncBackendData = () => {
+      fetch('/api/timetable')
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setTimetable(data);
+            try {
+              localStorage.setItem('classpilot_timetable', JSON.stringify(data));
+            } catch (e) {}
+          }
+        })
+        .catch((err) => {});
 
-    fetch('/api/faculty')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setFacultyList(data);
-          try {
-            localStorage.setItem('classpilot_faculty_list', JSON.stringify(data));
-          } catch (e) {}
-        }
-      })
-      .catch((err) => console.log('Loaded default faculty state'));
+      fetch('/api/faculty')
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setFacultyList(data);
+            try {
+              localStorage.setItem('classpilot_faculty_list', JSON.stringify(data));
+            } catch (e) {}
+          }
+        })
+        .catch((err) => {});
 
-    fetch('/api/rooms')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setRoomList(data);
-          try {
-            localStorage.setItem('classpilot_room_list', JSON.stringify(data));
-          } catch (e) {}
-        }
-      })
-      .catch((err) => console.log('Loaded default room state'));
+      fetch('/api/rooms')
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setRoomList(data);
+            try {
+              localStorage.setItem('classpilot_room_list', JSON.stringify(data));
+            } catch (e) {}
+          }
+        })
+        .catch((err) => {});
 
-    fetch('/api/students')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setStudents(data);
-          try {
-            localStorage.setItem('classpilot_students', JSON.stringify(data));
-          } catch (e) {}
-        }
-      })
-      .catch((err) => console.log('Loaded default student state'));
+      fetch('/api/students')
+        .then((res) => res.json())
+        .then((data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setStudents(data);
+            try {
+              localStorage.setItem('classpilot_students', JSON.stringify(data));
+            } catch (e) {}
+          }
+        })
+        .catch((err) => {});
+    };
+
+    // Initial fetch on mount
+    syncBackendData();
+
+    // Poll server every 8 seconds so all connected devices update automatically
+    const pollInterval = setInterval(syncBackendData, 8000);
 
     // Listen for PWA Install Prompt
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -497,6 +506,10 @@ export default function App() {
     if ('Notification' in window && Notification.permission === 'granted') {
       setNotificationsEnabled(true);
     }
+
+    return () => {
+      clearInterval(pollInterval);
+    };
   }, []);
 
   // --- AUTOMATIC FACULTY PROFILE SYNC FOR LOGGED IN USER ---
@@ -812,25 +825,70 @@ export default function App() {
     replaceExisting: boolean,
     rawFileData?: { fileName: string; contentBase64?: string; fileSizeBytes?: number }
   ): Promise<{ success: boolean; count?: number; error?: string }> => {
-    // 1. Structure each class period entry cleanly
-    const formattedEntries: TimetableEntry[] = entries.map((e, idx) => ({
-      id: e.id || `tt_import_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
-      facultyId: e.facultyId || 'fac_1',
-      facultyName: e.facultyName || 'Faculty Member',
-      subjectCode: e.subjectCode || 'CS101',
-      subjectName: e.subjectName || 'Course',
-      room: e.room || 'Room No. C1',
-      day: e.day || 'Monday',
-      startTime: e.startTime || '09:00',
-      endTime: e.endTime || '10:15',
-      batch: e.batch || 'FYUGP',
-      department: e.department || 'Commerce',
-      semesterCycle: e.semesterCycle || 'Odd',
-      programSemester: e.programSemester || 'FYUGP 1st Semester',
-      paperCategory: e.paperCategory || 'Major',
-      notes: e.notes || '',
-      isSubstitute: e.isSubstitute || false,
-    }));
+    // 1. Structure each class period entry & auto-link to faculty members
+    const updatedFacultyList = [...facultyList];
+    const createdNewFacultyList: Faculty[] = [];
+
+    const formattedEntries: TimetableEntry[] = entries.map((e, idx) => {
+      const rawFacName = (e.facultyName || '').trim();
+      let matchedFac = updatedFacultyList.find(
+        (f) =>
+          (e.facultyId && f.id === e.facultyId) ||
+          (rawFacName && isFacultyNameMatch(f.name, rawFacName)) ||
+          (f.email && rawFacName && f.email.toLowerCase().startsWith(rawFacName.toLowerCase()))
+      );
+
+      // Auto-register faculty into faculty database if not currently existing
+      if (!matchedFac && rawFacName && rawFacName.toLowerCase() !== 'faculty member' && rawFacName.toLowerCase() !== 'unassigned') {
+        const newFacId = `fac_auto_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+        matchedFac = {
+          id: newFacId,
+          name: rawFacName,
+          email: `${rawFacName.toLowerCase().replace(/[^a-z0-9]/g, '')}@college.edu`,
+          department: e.department || 'Commerce',
+          designation: 'Faculty Member',
+          phone: '',
+          employeeId: `EMP-${Math.floor(1000 + Math.random() * 9000)}`,
+          isVerified: true,
+        };
+        updatedFacultyList.push(matchedFac);
+        createdNewFacultyList.push(matchedFac);
+      }
+
+      return {
+        id: e.id || `tt_import_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+        facultyId: matchedFac ? matchedFac.id : e.facultyId || 'fac_1',
+        facultyName: matchedFac ? matchedFac.name : rawFacName || 'Faculty Member',
+        subjectCode: e.subjectCode || 'CS101',
+        subjectName: e.subjectName || 'Course',
+        room: e.room || 'Room No. C1',
+        day: e.day || 'Monday',
+        startTime: e.startTime || '09:00',
+        endTime: e.endTime || '10:15',
+        batch: e.batch || 'FYUGP',
+        department: e.department || (matchedFac ? matchedFac.department : 'Commerce'),
+        semesterCycle: e.semesterCycle || 'Odd',
+        programSemester: e.programSemester || 'FYUGP 1st Semester',
+        paperCategory: e.paperCategory || 'Major',
+        notes: e.notes || '',
+        isSubstitute: e.isSubstitute || false,
+      };
+    });
+
+    if (createdNewFacultyList.length > 0) {
+      setFacultyList(updatedFacultyList);
+      try {
+        localStorage.setItem('classpilot_faculty_list', JSON.stringify(updatedFacultyList));
+      } catch (e) {}
+      createdNewFacultyList.forEach((f) => {
+        saveFacultyToFirestore(f).catch(() => {});
+        fetch('/api/faculty', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(f),
+        }).catch(() => {});
+      });
+    }
 
     // 2. Pre-Import Backup of current routine if replacing existing data
     if (replaceExisting && timetable.length > 0) {

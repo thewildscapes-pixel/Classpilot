@@ -219,6 +219,47 @@ async function initDatabase() {
     });
   }
 
+  const rmCountRes = db.exec('SELECT COUNT(*) as count FROM rooms');
+  const rmCount = rmCountRes.length > 0 && rmCountRes[0].values.length > 0 ? (rmCountRes[0].values[0][0] as number) : 0;
+  if (rmCount === 0) {
+    console.log('🌱 Seeding initial rooms into SQLite...');
+    INITIAL_ROOMS.forEach((r) => {
+      runSql(
+        'INSERT OR REPLACE INTO rooms (id, name, building, floor, capacity, type, equipment) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [r.id, r.name, r.building || '', r.floor || 1, r.capacity || 50, r.type || 'Classroom', r.equipment || '']
+      );
+    });
+  }
+
+  const ttCountRes = db.exec('SELECT COUNT(*) as count FROM timetable');
+  const ttCount = ttCountRes.length > 0 && ttCountRes[0].values.length > 0 ? (ttCountRes[0].values[0][0] as number) : 0;
+  if (ttCount === 0) {
+    console.log('🌱 Seeding initial timetable into SQLite...');
+    INITIAL_TIMETABLE.forEach((t) => {
+      runSql(
+        'INSERT OR REPLACE INTO timetable (id, facultyId, facultyName, subjectCode, subjectName, room, day, startTime, endTime, batch, department, semesterCycle, programSemester, paperCategory, notes, isSubstitute) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          t.id,
+          t.facultyId,
+          t.facultyName,
+          t.subjectCode,
+          t.subjectName,
+          t.room,
+          t.day,
+          t.startTime,
+          t.endTime,
+          t.batch,
+          t.department,
+          t.semesterCycle || 'Odd',
+          t.programSemester || 'FYUGP 1st Semester',
+          t.paperCategory || 'Major',
+          t.notes || '',
+          t.isSubstitute ? 1 : 0,
+        ]
+      );
+    });
+  }
+
   const stCountRes = db.exec('SELECT COUNT(*) as count FROM students');
   const stCount = stCountRes.length > 0 && stCountRes[0].values.length > 0 ? (stCountRes[0].values[0][0] as number) : 0;
   if (stCount === 0) {
