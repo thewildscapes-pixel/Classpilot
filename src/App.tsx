@@ -181,16 +181,158 @@ export default function App() {
   };
 
 
+  // Helper to resolve and link faculty record with step-by-step verification logging
+  const resolveFacultyForUser = (user: User, facList: Faculty[]): User => {
+    const rawName = user.name || '';
+    const rawEmail = user.email || '';
+    const rawPhone = user.phone || '';
+    const rawWhatsapp = user.whatsappPhone || '';
+    const rawFacultyId = user.facultyId || '';
+
+    const cleanEmail = rawEmail.toLowerCase().trim();
+    const cleanPhone = rawPhone.trim().replace(/\D/g, '');
+    const cleanWhatsapp = rawWhatsapp.trim().replace(/\D/g, '');
+
+    console.group(`[FacultyLookup] Resolving Faculty linkage for user: "${rawName}"`);
+    console.log(`[FacultyLookup] Raw User Inputs:`, {
+      name: rawName,
+      email: rawEmail,
+      phone: rawPhone,
+      whatsappPhone: rawWhatsapp,
+      facultyId: rawFacultyId,
+      role: user.role,
+    });
+    console.log(`[FacultyLookup] Cleaned Matching Criteria:`, {
+      cleanEmail,
+      cleanPhone,
+      cleanWhatsapp,
+    });
+    console.log(`[FacultyLookup] Total Faculty Records in Database: ${facList?.length || 0}`);
+
+    if (!facList || facList.length === 0) {
+      console.warn('[FacultyLookup] Faculty database list is empty! Cannot perform linkage lookup.');
+      console.groupEnd();
+      return user;
+    }
+
+    // Print summary table of available faculty in database
+    console.log('[FacultyLookup] Loaded Faculty Database Summary:');
+    console.table(
+      facList.map((f) => ({
+        ID: f.id,
+        Name: f.name,
+        Email: f.email || '(none)',
+        Phone: f.phone || f.whatsappPhone || '(none)',
+        Department: f.department || '(none)',
+      }))
+    );
+
+    let matched: Faculty | undefined = undefined;
+
+    // Step 1: Direct ID Match
+    console.log(`[FacultyLookup] Step 1: Evaluating Direct ID Match ("${rawFacultyId}")...`);
+    if (rawFacultyId) {
+      matched = facList.find((f) => f.id === rawFacultyId);
+      if (matched) {
+        console.log(`[FacultyLookup] -> Step 1 MATCH FOUND by Direct ID! Found: "${matched.name}" (ID: "${matched.id}")`);
+      } else {
+        console.log(`[FacultyLookup] -> Step 1 NO MATCH for ID "${rawFacultyId}". Evaluated IDs:`, facList.map((f) => f.id));
+      }
+    } else {
+      console.log(`[FacultyLookup] -> Step 1 SKIPPED (No facultyId on user object).`);
+    }
+
+    // Step 2: Strict Case-Insensitive Email Match
+    if (!matched && cleanEmail) {
+      console.log(`[FacultyLookup] Step 2: Evaluating Email Match ("${cleanEmail}")...`);
+      facList.forEach((f) => {
+        const facEmailClean = f.email ? f.email.toLowerCase().trim() : '';
+        console.log(`  Evaluating candidate "${f.name}" (ID: ${f.id}) - Faculty Email: "${facEmailClean}" vs User Email: "${cleanEmail}" -> Match: ${facEmailClean === cleanEmail}`);
+      });
+      matched = facList.find((f) => f.email && f.email.toLowerCase().trim() === cleanEmail);
+      if (matched) {
+        console.log(`[FacultyLookup] -> Step 2 MATCH FOUND by Email! Found: "${matched.name}" (ID: "${matched.id}")`);
+      } else {
+        console.log(`[FacultyLookup] -> Step 2 NO MATCH for Email "${cleanEmail}".`);
+      }
+    } else if (!matched) {
+      console.log(`[FacultyLookup] -> Step 2 SKIPPED (User email is empty).`);
+    }
+
+    // Step 3: Phone / WhatsApp Match
+    if (!matched && (cleanPhone || cleanWhatsapp)) {
+      console.log(`[FacultyLookup] Step 3: Evaluating Phone/WhatsApp Match (Phone: "${cleanPhone}", WhatsApp: "${cleanWhatsapp}")...`);
+      facList.forEach((f) => {
+        const m1 = isPhoneMatch(f.phone, cleanPhone);
+        const m2 = isPhoneMatch(f.whatsappPhone, cleanPhone);
+        const m3 = isPhoneMatch(f.phone, cleanWhatsapp);
+        const m4 = isPhoneMatch(f.whatsappPhone, cleanWhatsapp);
+        console.log(`  Evaluating candidate "${f.name}" (ID: ${f.id}) - Phone: "${f.phone}", WhatsApp: "${f.whatsappPhone}" -> Match Result: ${m1 || m2 || m3 || m4}`);
+      });
+      matched = facList.find(
+        (f) =>
+          isPhoneMatch(f.phone, cleanPhone) ||
+          isPhoneMatch(f.whatsappPhone, cleanPhone) ||
+          isPhoneMatch(f.phone, cleanWhatsapp) ||
+          isPhoneMatch(f.whatsappPhone, cleanWhatsapp)
+      );
+      if (matched) {
+        console.log(`[FacultyLookup] -> Step 3 MATCH FOUND by Phone! Found: "${matched.name}" (ID: "${matched.id}")`);
+      } else {
+        console.log(`[FacultyLookup] -> Step 3 NO MATCH for Phone/WhatsApp.`);
+      }
+    } else if (!matched) {
+      console.log(`[FacultyLookup] -> Step 3 SKIPPED (User phone numbers are empty).`);
+    }
+
+    // Step 4: Name Match (Case-insensitive & Token Match)
+    if (!matched && rawName) {
+      console.log(`[FacultyLookup] Step 4: Evaluating Name Match ("${rawName}")...`);
+      facList.forEach((f) => {
+        const isMatch = isFacultyNameMatch(f.name, rawName);
+        console.log(`  Evaluating candidate "${f.name}" (ID: ${f.id}) vs User Name "${rawName}" -> isFacultyNameMatch: ${isMatch}`);
+      });
+      matched = facList.find((f) => f.name && isFacultyNameMatch(f.name, rawName));
+      if (matched) {
+        console.log(`[FacultyLookup] -> Step 4 MATCH FOUND by Name! Found: "${matched.name}" (ID: "${matched.id}")`);
+      } else {
+        console.log(`[FacultyLookup] -> Step 4 NO MATCH for Name "${rawName}".`);
+      }
+    } else if (!matched) {
+      console.log(`[FacultyLookup] -> Step 4 SKIPPED (User name is empty).`);
+    }
+
+    if (matched) {
+      console.log(
+        `[FacultyLookup] SUCCESS: Verified linkage for user "${rawName}". Linked to Faculty ID "${matched.id}" (${matched.name}, Dept: ${matched.department || 'N/A'})`
+      );
+      console.groupEnd();
+      return {
+        ...user,
+        facultyId: matched.id,
+        name: user.name || matched.name,
+        department: user.department || matched.department,
+      };
+    } else {
+      console.warn(
+        `[FacultyLookup] WARNING: Could not link user "${rawName}" (Email: "${rawEmail}", Phone: "${rawPhone}") to any registered faculty in database. Retaining default facultyId "${rawFacultyId}".`
+      );
+      console.groupEnd();
+      return user;
+    }
+  };
+
   // Login handler from Landing Page or Modal
   const handleLoginSuccess = (user: User, token?: string) => {
-    setCurrentUser(user);
-    if (user.facultyId) {
-      setSelectedFacultyId(user.facultyId);
+    const resolvedUser = resolveFacultyForUser(user, facultyList);
+    setCurrentUser(resolvedUser);
+    if (resolvedUser.facultyId) {
+      setSelectedFacultyId(resolvedUser.facultyId);
     }
     // Sync profile to Firestore
-    saveUserProfileInFirestore(user).catch((err) => console.warn('Firestore profile sync error:', err));
+    saveUserProfileInFirestore(resolvedUser).catch((err) => console.warn('Firestore profile sync error:', err));
     try {
-      localStorage.setItem('classpilot_user_session', JSON.stringify(user));
+      localStorage.setItem('classpilot_user_session', JSON.stringify(resolvedUser));
       if (token) localStorage.setItem('classpilot_user_token', token);
     } catch (e) {
       console.warn('LocalStorage save failed:', e);
@@ -211,6 +353,27 @@ export default function App() {
       console.warn('LocalStorage clear failed:', e);
     }
   };
+
+  // Auto-sync logged-in currentUser with facultyList to ensure facultyId points directly to their official routine
+  useEffect(() => {
+    if (!currentUser || facultyList.length === 0) return;
+
+    const resolvedUser = resolveFacultyForUser(currentUser, facultyList);
+
+    if (resolvedUser.facultyId !== currentUser.facultyId) {
+      console.log(
+        `[FacultySyncEffect] Updating currentUser.facultyId from "${currentUser.facultyId}" to "${resolvedUser.facultyId}"`
+      );
+      setCurrentUser(resolvedUser);
+      try {
+        localStorage.setItem('classpilot_user_session', JSON.stringify(resolvedUser));
+      } catch (e) {}
+    }
+
+    if (resolvedUser.facultyId && selectedFacultyId !== resolvedUser.facultyId) {
+      setSelectedFacultyId(resolvedUser.facultyId);
+    }
+  }, [currentUser, facultyList]);
 
   // Time & Demo Simulation
   const [realTimeOffsetMs, setRealTimeOffsetMs] = useState<number>(0);
@@ -1165,10 +1328,7 @@ export default function App() {
         onClose={() => setIsLoginModalOpen(false)}
         currentUser={currentUser}
         onSelectUser={(user) => {
-          setCurrentUser(user);
-          if (user.facultyId) {
-            setSelectedFacultyId(user.facultyId);
-          }
+          handleLoginSuccess(user);
         }}
         onLoginCustomEmail={(email, role) => {
           const user: User = {
@@ -1176,10 +1336,10 @@ export default function App() {
             name: email.split('@')[0],
             email,
             role,
-            facultyId: facultyList[0]?.id || 'fac_1',
-            department: 'Computer Science',
+            facultyId: '',
+            department: 'Commerce',
           };
-          setCurrentUser(user);
+          handleLoginSuccess(user);
         }}
       />
 
