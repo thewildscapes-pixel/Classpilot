@@ -13,6 +13,7 @@ import {
   detectConflicts,
   generateSampleCsvContent,
   parseTimeToMinutes,
+  isFacultyNameMatch,
 } from '../utils/timeUtils';
 import * as XLSX from 'xlsx';
 import {
@@ -938,7 +939,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           }
 
           const facName = getRowVal(row, ['facultyname', 'faculty', 'teacher', 'instructor', 'lecturer', 'prof', 'name']) || 'Unassigned Faculty';
-          let facMatch = facultyList.find((f) => f.name.toLowerCase().includes(facName.toLowerCase()));
+          let facMatch = facultyList.find((f) => isFacultyNameMatch(f.name, facName));
 
           if (!facMatch && facName.toLowerCase() !== 'unassigned' && facName.toLowerCase() !== 'vacant') {
             const newFacId = `fac_${Date.now()}_${idx}`;

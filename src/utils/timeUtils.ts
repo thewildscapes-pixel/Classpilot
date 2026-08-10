@@ -244,6 +244,36 @@ export function detectConflicts(entries: TimetableEntry[]): ScheduleConflict[] {
   return conflicts;
 }
 
+
+export function normalizeFacultyName(name: string = ''): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(dr|prof|mr|mrs|ms|doc|associate|assistant|professor|sir|madam)\.?:?\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+export function isFacultyNameMatch(name1: string = '', name2: string = ''): boolean {
+  if (!name1 || !name2) return false;
+  const n1 = normalizeFacultyName(name1);
+  const n2 = normalizeFacultyName(name2);
+  if (!n1 || !n2) return false;
+  if (n1 === n2) return true;
+  if (n1.length >= 4 && n2.length >= 4 && (n1.includes(n2) || n2.includes(n1))) return true;
+  return false;
+}
+
+export function isPhoneMatch(p1?: string, p2?: string): boolean {
+  if (!p1 || !p2) return false;
+  const clean1 = p1.replace(/\D/g, '');
+  const clean2 = p2.replace(/\D/g, '');
+  if (!clean1 || !clean2) return false;
+  if (clean1 === clean2) return true;
+  const last10_1 = clean1.length >= 10 ? clean1.slice(-10) : clean1;
+  const last10_2 = clean2.length >= 10 ? clean2.slice(-10) : clean2;
+  return last10_1 === last10_2;
+}
+
 export function generateSampleCsvContent(): string {
   return `Faculty ID,Faculty Name,Department,Subject Code,Subject Name,Room,Day,Start Time,End Time,Batch
 fac_1,Dr. Deborshee Gogoi,Commerce,COM101,Financial Accounting,Room No. C1,Monday,08:00,09:00,FYUGP 1st Sem Commerce

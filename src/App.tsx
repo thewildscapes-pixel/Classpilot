@@ -24,6 +24,8 @@ import {
   parseTimeToMinutes,
   formatTime24H,
   getEntryStatus,
+  isFacultyNameMatch,
+  isPhoneMatch,
 } from './utils/timeUtils';
 import { playAlertChime, playSchoolBellSound, stopSchoolBellSound } from './utils/audioUtils';
 import {
@@ -333,6 +335,77 @@ export default function App() {
       setNotificationsEnabled(true);
     }
   }, []);
+
+  // --- AUTOMATIC FACULTY PROFILE SYNC FOR LOGGED IN USER ---
+  useEffect(() => {
+    if (!currentUser || !facultyList || facultyList.length === 0) return;
+
+    // 1. Check if currentUser's facultyId directly matches a faculty
+    const directFac = facultyList.find((f) => f.id === currentUser.facultyId);
+    if (directFac) {
+      if (selectedFacultyId !== directFac.id) {
+        setSelectedFacultyId(directFac.id);
+      }
+      return;
+    }
+
+    // 2. Otherwise match currentUser by phone, whatsapp, email, or name
+    const cPhone = currentUser.phone || currentUser.whatsappPhone || '';
+    const cEmail = (currentUser.email || '').toLowerCase().trim();
+
+    const matchedFac = facultyList.find((f) => {
+      if (isPhoneMatch(f.phone, cPhone) || isPhoneMatch(f.whatsappPhone, cPhone)) return true;
+      if (cEmail && f.email && f.email.toLowerCase().trim() === cEmail) return true;
+      if (isFacultyNameMatch(f.name, currentUser.name)) return true;
+      return false;
+    });
+
+    if (matchedFac) {
+      setSelectedFacultyId(matchedFac.id);
+      if (currentUser.facultyId !== matchedFac.id) {
+        const updatedUser: User = {
+          ...currentUser,
+          facultyId: matchedFac.id,
+          name: matchedFac.name,
+          department: matchedFac.department || currentUser.department,
+        };
+        setCurrentUser(updatedUser);
+        try {
+          localStorage.setItem('classpilot_user_session', JSON.stringify(updatedUser));
+        } catch (e) {}
+      }
+    }
+  }, [currentUser, facultyList]);
+
+  // --- AUTO-RECONCILE ROUTINE TIMETABLE ENTRIES WITH FACULTY LIST ---
+  useEffect(() => {
+    if (!facultyList || facultyList.length === 0 || !timetable || timetable.length === 0) return;
+
+    let modified = false;
+    const reconciled = timetable.map((entry) => {
+      // If entry already matches a valid facultyId in facultyList, keep it
+      if (facultyList.some((f) => f.id === entry.facultyId)) return entry;
+
+      // Try matching entry.facultyName against facultyList
+      const matched = facultyList.find((f) => isFacultyNameMatch(f.name, entry.facultyName));
+      if (matched) {
+        modified = true;
+        return {
+          ...entry,
+          facultyId: matched.id,
+          facultyName: matched.name,
+        };
+      }
+      return entry;
+    });
+
+    if (modified) {
+      setTimetable(reconciled);
+      try {
+        localStorage.setItem('classpilot_timetable', JSON.stringify(reconciled));
+      } catch (e) {}
+    }
+  }, [facultyList, timetable]);
 
   // --- LIVE CLOCK TICK ENGINE ---
   useEffect(() => {

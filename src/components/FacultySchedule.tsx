@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TimetableEntry, Faculty, DayOfWeek, User, Student } from '../types';
-import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName } from '../utils/timeUtils';
+import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName, isFacultyNameMatch } from '../utils/timeUtils';
 import { ClassQrAttendanceModal } from './ClassQrAttendanceModal';
 import {
   Calendar,
@@ -114,8 +114,13 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     setViewMode('daily');
   };
 
-  // Filter timetable entries for selected faculty
-  const allFacultyEntries = timetable.filter((e) => e.facultyId === selectedFacultyId);
+  // Filter timetable entries for selected faculty (by ID or by Name match)
+  const allFacultyEntries = timetable.filter((e) => {
+    if (e.facultyId === selectedFacultyId) return true;
+    if (currentFaculty && e.facultyId === currentFaculty.id) return true;
+    if (currentFaculty && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
+    return false;
+  });
 
   // Filter single day entries
   const dayEntries = allFacultyEntries

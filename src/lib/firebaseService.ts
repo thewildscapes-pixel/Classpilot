@@ -2,6 +2,7 @@ import {
   db,
   auth,
   googleProvider,
+  githubProvider,
   signInWithPopup,
   signOut,
   onAuthStateChanged,
@@ -59,6 +60,55 @@ export async function signInWithGoogleFirebase(): Promise<User> {
       email: fbUser.email || 'thewildscapes@gmail.com',
       whatsappPhone: '9706375001',
       role: fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' ? 'admin' : 'faculty',
+      facultyId: `fac_${fbUser.uid.substring(0, 5)}`,
+      department: 'Commerce',
+      isVerified: true,
+    };
+
+    await setDoc(userRef, {
+      ...appUser,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+
+  return appUser;
+}
+
+/**
+ * Sign in with GitHub Auth provider and sync profile to Firestore users/{uid}
+ */
+export async function signInWithGithubFirebase(): Promise<User> {
+  const result = await signInWithPopup(auth, githubProvider);
+  const fbUser = result.user;
+
+  // Check if profile exists in Firestore
+  const userRef = doc(db, 'users', fbUser.uid);
+  const userSnap = await getDoc(userRef);
+
+  let appUser: User;
+
+  if (userSnap.exists()) {
+    const data = userSnap.data();
+    appUser = {
+      id: fbUser.uid,
+      name: data.name || fbUser.displayName || 'Dr. Faculty Member',
+      email: fbUser.email || (fbUser.providerData?.[0]?.email) || 'faculty@digboicollege.edu.in',
+      whatsappPhone: data.whatsappPhone || '9706375001',
+      role: data.role || (fbUser.email?.toLowerCase().includes('thewildscapes') ? 'admin' : 'faculty'),
+      facultyId: data.facultyId || `fac_${fbUser.uid.substring(0, 5)}`,
+      department: data.department || 'Commerce',
+      isVerified: true,
+    };
+  } else {
+    // Create new faculty profile in Firestore linked to Auth UID
+    const githubEmail = fbUser.email || (fbUser.providerData?.[0]?.email) || 'thewildscapes@gmail.com';
+    appUser = {
+      id: fbUser.uid,
+      name: fbUser.displayName || 'Dr. Deborshee Gogoi',
+      email: githubEmail,
+      whatsappPhone: '9706375001',
+      role: githubEmail.toLowerCase().includes('thewildscapes') ? 'admin' : 'faculty',
       facultyId: `fac_${fbUser.uid.substring(0, 5)}`,
       department: 'Commerce',
       isVerified: true,
