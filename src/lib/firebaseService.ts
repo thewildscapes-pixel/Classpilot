@@ -180,7 +180,11 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
           endTime: data.endTime || '',
           batch: data.batch || '',
           department: data.department || '',
+          semesterCycle: data.semesterCycle,
+          programSemester: data.programSemester,
+          paperCategory: data.paperCategory,
           notes: data.notes || '',
+          isSubstitute: data.isSubstitute || false,
         });
       });
 
@@ -227,7 +231,11 @@ export async function saveTimetableToFirestore(
         endTime: entry.endTime || '10:15',
         batch: entry.batch || 'FYUGP',
         department: entry.department || 'Commerce',
-        notes: entry.notes || '',
+        ...(entry.semesterCycle ? { semesterCycle: entry.semesterCycle } : {}),
+        ...(entry.programSemester ? { programSemester: entry.programSemester } : {}),
+        ...(entry.paperCategory ? { paperCategory: entry.paperCategory } : {}),
+        ...(entry.notes ? { notes: entry.notes } : {}),
+        ...(entry.isSubstitute ? { isSubstitute: entry.isSubstitute } : {}),
       };
 
       return setDoc(docRef, {
@@ -268,7 +276,11 @@ export async function addTimetableEntryToFirestore(entryData: Partial<TimetableE
       endTime: entryData.endTime || '10:15',
       batch: entryData.batch || 'CS-1A',
       department: entryData.department || 'Computer Science',
-      notes: entryData.notes || '',
+      ...(entryData.semesterCycle ? { semesterCycle: entryData.semesterCycle } : {}),
+      ...(entryData.programSemester ? { programSemester: entryData.programSemester } : {}),
+      ...(entryData.paperCategory ? { paperCategory: entryData.paperCategory } : {}),
+      ...(entryData.notes ? { notes: entryData.notes } : {}),
+      ...(entryData.isSubstitute ? { isSubstitute: entryData.isSubstitute } : {}),
     };
 
     await setDoc(docRef, {

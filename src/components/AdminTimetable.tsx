@@ -44,6 +44,9 @@ import {
   FileCode,
   Database,
   Eye,
+  Sparkles,
+  Send,
+  ArrowRight,
 } from 'lucide-react';
 
 interface AdminTimetableProps {
@@ -434,6 +437,164 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   // Conflicts list
   const conflicts = detectConflicts(timetable);
 
+  // Visual Conflict Checker State
+  const [conflictTypeFilter, setConflictTypeFilter] = useState<'all' | 'faculty' | 'room' | 'batch'>('all');
+  const [conflictDayFilter, setConflictDayFilter] = useState<string>('All');
+  const [conflictSlotFilter, setConflictSlotFilter] = useState<string>('All');
+  const [conflictDeptFilter, setConflictDeptFilter] = useState<string>('All');
+  const [resolutionNotice, setResolutionNotice] = useState<{ title: string; message: string; type: 'success' | 'info' } | null>(null);
+
+  // Helper: Find empty available rooms for a given slot
+  const getAvailableRoomsForSlot = (day: DayOfWeek, startTime: string, endTime: string, currentRoomName?: string) => {
+    const sMin = parseTimeToMinutes(startTime);
+    const eMin = parseTimeToMinutes(endTime);
+
+    // Get rooms occupied during this time window
+    const occupiedRoomNames = new Set(
+      timetable
+        .filter((entry) => {
+          if (entry.day !== day) return false;
+          const entryStart = parseTimeToMinutes(entry.startTime);
+          const entryEnd = parseTimeToMinutes(entry.endTime);
+          return entryStart < eMin && entryEnd > sMin;
+        })
+        .map((e) => e.room.trim().toLowerCase())
+    );
+
+    const defaultCampusRooms = [
+      'Room No. C1', 'Room No. C2', 'Room No. C3', 'Room No. C4', 'Room No. C5',
+      'Room No. C6', 'Room No. C7', 'Room No. C8', 'Room No. C9', 'Room No. C10',
+      'Commerce Hall', 'LH-101', 'LH-102', 'LH-201', 'CS Lab 1', 'CS Lab 2', 'Seminar Hall'
+    ];
+
+    const allRoomNames = Array.from(
+      new Set([...roomList.map((r) => r.name), ...defaultCampusRooms])
+    );
+
+    return allRoomNames.filter(
+      (rName) =>
+        rName.trim().toLowerCase() !== (currentRoomName || '').trim().toLowerCase() &&
+        !occupiedRoomNames.has(rName.trim().toLowerCase())
+    );
+  };
+
+  // Helper: Find available open time slots for an entry
+  const getFreeTimeSlotsForEntry = (entry: TimetableEntry) => {
+    const day = entry.day;
+    const facId = entry.facultyId;
+    const roomName = entry.room.trim().toLowerCase();
+    const batchName = entry.batch.trim().toLowerCase();
+
+    return HOURLY_TIME_SLOTS.filter((slot) => {
+      if (slot.startTime === entry.startTime && slot.endTime === entry.endTime) return false;
+
+      const sMin = parseTimeToMinutes(slot.startTime);
+      const eMin = parseTimeToMinutes(slot.endTime);
+
+      const isBusy = timetable.some((e) => {
+        if (e.id === entry.id || e.day !== day) return false;
+        const eStart = parseTimeToMinutes(e.startTime);
+        const eEnd = parseTimeToMinutes(e.endTime);
+        const overlaps = eStart < eMin && eEnd > sMin;
+        if (!overlaps) return false;
+
+        return (
+          e.facultyId === facId ||
+          e.room.trim().toLowerCase() === roomName ||
+          e.batch.trim().toLowerCase() === batchName
+        );
+      });
+
+      return !isBusy;
+    });
+  };
+
+  // Helper: Find substitute faculty in same department free during slot
+  const getFreeFacultyForSlot = (entry: TimetableEntry) => {
+    const sMin = parseTimeToMinutes(entry.startTime);
+    const eMin = parseTimeToMinutes(entry.endTime);
+
+    const busyFacultyIds = new Set(
+      timetable
+        .filter((e) => {
+          if (e.day !== entry.day) return false;
+          const eStart = parseTimeToMinutes(e.startTime);
+          const eEnd = parseTimeToMinutes(e.endTime);
+          return eStart < eMin && eEnd > sMin;
+        })
+        .map((e) => e.facultyId)
+    );
+
+    return facultyList.filter(
+      (f) =>
+        f.id !== entry.facultyId &&
+        !busyFacultyIds.has(f.id) &&
+        (f.department.toLowerCase() === entry.department.toLowerCase() || entry.department === 'All')
+    );
+  };
+
+  // Resolution Handlers
+  const handleMoveToRoom = (targetEntry: TimetableEntry, newRoom: string) => {
+    onUpdateEntry(targetEntry.id, { room: newRoom });
+    setResolutionNotice({
+      title: 'Room Clashed Class Reassigned!',
+      message: `Successfully moved "${targetEntry.subjectName}" (${targetEntry.facultyName}) to empty room "${newRoom}" on ${targetEntry.day} (${targetEntry.startTime}-${targetEntry.endTime}).`,
+      type: 'success',
+    });
+  };
+
+  const handleRescheduleTime = (targetEntry: TimetableEntry, newStart: string, newEnd: string) => {
+    onUpdateEntry(targetEntry.id, { startTime: newStart, endTime: newEnd });
+    setResolutionNotice({
+      title: 'Class Rescheduled Successfully!',
+      message: `Rescheduled "${targetEntry.subjectName}" to new time slot ${newStart} - ${newEnd} on ${targetEntry.day}.`,
+      type: 'success',
+    });
+  };
+
+  const handleReassignFacultyMember = (targetEntry: TimetableEntry, newFac: Faculty) => {
+    onUpdateEntry(targetEntry.id, { facultyId: newFac.id, facultyName: newFac.name });
+    setResolutionNotice({
+      title: 'Substitute Faculty Assigned!',
+      message: `Reassigned "${targetEntry.subjectName}" to substitute faculty "${newFac.name}" (${newFac.department}).`,
+      type: 'success',
+    });
+  };
+
+  const handleAlertCoordinatorForConflict = (conflict: ScheduleConflict) => {
+    const e1 = conflict.entry1;
+    const e2 = conflict.entry2;
+    setResolutionNotice({
+      title: '📢 Academic Coordinator Alert Dispatched',
+      message: `Formal conflict dispatch sent to Academic Coordinator for ${conflict.type === 'faculty' ? 'Faculty Double-Booking' : conflict.type === 'room' ? 'Room Double-Booking' : 'Batch Schedule Clash'} between "${e1.subjectName}" (${e1.facultyName}) and "${e2.subjectName}" (${e2.facultyName}) on ${e1.day} (${e1.startTime}-${e1.endTime}). Notifications pushed to both faculty members.`,
+      type: 'info',
+    });
+  };
+
+  const handleAutoResolveAllRoomClashes = () => {
+    const roomConflicts = conflicts.filter((c) => c.type === 'room');
+    if (roomConflicts.length === 0) {
+      alert('No room double-booking conflicts found to auto-resolve.');
+      return;
+    }
+
+    let count = 0;
+    roomConflicts.forEach((conf) => {
+      const e2 = conf.entry2;
+      const freeRooms = getAvailableRoomsForSlot(e2.day, e2.startTime, e2.endTime, e2.room);
+      if (freeRooms.length > 0) {
+        onUpdateEntry(e2.id, { room: freeRooms[0] });
+        count++;
+      }
+    });
+
+    setResolutionNotice({
+      title: '✨ Auto-Resolved Room Clashes',
+      message: `Automatically reassigned ${count} conflicting room allocation(s) to vacant campus classrooms!`,
+      type: 'success',
+    });
+  };
+
   // Active departments present
   const activeDepartmentsList = Array.from(
     new Set([...DEPARTMENTS_LIST, ...timetable.map((t) => t.department)])
@@ -503,7 +664,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     XLSX.writeFile(workbook, fileName);
   };
 
-  // Handle Excel/CSV File Upload with Raw File Base64 Retention
+  // Handle Excel/CSV File Upload with Raw File Base64 Retention & Smart Column Mapping
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -531,29 +692,144 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         const wb = XLSX.read(bstr, { type: 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json<Record<string, string>>(ws);
+        const data = XLSX.utils.sheet_to_json<Record<string, any>>(ws);
 
-        const converted: Partial<TimetableEntry>[] = data.map((row) => {
-          const facName = row['Faculty Name'] || row['facultyName'] || row['Faculty'] || 'Dr. Deborshee Gogoi';
-          const facMatch = facultyList.find(
-            (f) => f.name.toLowerCase().includes(facName.toLowerCase())
-          ) || facultyList[0];
+        if (!data || data.length === 0) {
+          alert('Uploaded spreadsheet contains no data rows.');
+          return;
+        }
+
+        const getRowVal = (row: Record<string, any>, possibleKeys: string[]): string => {
+          for (const k of Object.keys(row)) {
+            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (const p of possibleKeys) {
+              if (cleanK.includes(p)) {
+                const val = row[k];
+                if (val !== undefined && val !== null && String(val).trim() !== '') {
+                  return String(val).trim();
+                }
+              }
+            }
+          }
+          return '';
+        };
+
+        const parseTimeSlotString = (timeStr: string): { startTime: string; endTime: string } => {
+          if (!timeStr) return { startTime: '08:00', endTime: '09:00' };
+          const parts = timeStr.split(/[-–—to]/i);
+          if (parts.length >= 2) {
+            const start = normalizeTimeString(parts[0]);
+            const end = normalizeTimeString(parts[1]);
+            return { startTime: start || '08:00', endTime: end || '09:00' };
+          }
+          const norm = normalizeTimeString(timeStr);
+          return { startTime: norm || '08:00', endTime: '09:00' };
+        };
+
+        const normalizeTimeString = (str: string): string => {
+          if (!str) return '08:00';
+          const clean = str.trim().toUpperCase();
+          const isPM = clean.includes('PM');
+          const isAM = clean.includes('AM');
+          const digits = clean.replace(/[^0-9:]/g, '');
+          const parts = digits.split(':');
+          if (parts.length >= 2) {
+            let h = parseInt(parts[0], 10) || 8;
+            let m = parseInt(parts[1], 10) || 0;
+            if (isPM && h < 12) h += 12;
+            if (isAM && h === 12) h = 0;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          } else if (parts.length === 1 && parts[0].length > 0) {
+            let h = parseInt(parts[0], 10) || 8;
+            if (isPM && h < 12) h += 12;
+            return `${String(h).padStart(2, '0')}:00`;
+          }
+          return '08:00';
+        };
+
+        const normalizeDay = (dayStr: string): DayOfWeek => {
+          if (!dayStr) return 'Monday';
+          const l = dayStr.toLowerCase().trim();
+          if (l.includes('mon')) return 'Monday';
+          if (l.includes('tue')) return 'Tuesday';
+          if (l.includes('wed')) return 'Wednesday';
+          if (l.includes('thu')) return 'Thursday';
+          if (l.includes('fri')) return 'Friday';
+          if (l.includes('sat')) return 'Saturday';
+          return 'Monday';
+        };
+
+        const converted: Partial<TimetableEntry>[] = data.map((row, idx) => {
+          const rawDay = getRowVal(row, ['day', 'weekday']);
+          const day = normalizeDay(rawDay);
+
+          const rawPeriod = getRowVal(row, ['periodtime', 'period', 'timing', 'slot', 'classtime', 'time']);
+          const rawStart = getRowVal(row, ['starttime', 'start']);
+          const rawEnd = getRowVal(row, ['endtime', 'end']);
+
+          let startTime = '08:00';
+          let endTime = '09:00';
+
+          if (rawPeriod) {
+            const parsed = parseTimeSlotString(rawPeriod);
+            startTime = parsed.startTime;
+            endTime = parsed.endTime;
+          } else if (rawStart) {
+            startTime = normalizeTimeString(rawStart);
+            endTime = rawEnd ? normalizeTimeString(rawEnd) : '09:00';
+          }
+
+          const facName = getRowVal(row, ['facultyname', 'faculty', 'teacher', 'instructor', 'lecturer', 'prof', 'name']) || 'Unassigned Faculty';
+          let facMatch = facultyList.find((f) => f.name.toLowerCase().includes(facName.toLowerCase()));
+
+          if (!facMatch && facName.toLowerCase() !== 'unassigned' && facName.toLowerCase() !== 'vacant') {
+            const newFacId = `fac_${Date.now()}_${idx}`;
+            const dept = getRowVal(row, ['department', 'dept', 'branch']) || 'Commerce';
+            onAddFaculty({
+              id: newFacId,
+              name: facName,
+              email: `${facName.toLowerCase().replace(/[^a-z0-9]/g, '')}@college.edu`,
+              department: dept,
+              designation: 'Faculty Member',
+            });
+            facMatch = {
+              id: newFacId,
+              name: facName,
+              email: '',
+              department: dept,
+              designation: 'Faculty Member',
+            };
+          }
+
+          const subjCode = getRowVal(row, ['subjectcode', 'code', 'papercode']) || 'COM101';
+          const subjName = getRowVal(row, ['subjectname', 'subject', 'course', 'paper', 'title']) || 'Course Lecture';
+          const room = getRowVal(row, ['classnoroom', 'room', 'roomno', 'roomnumber', 'hall', 'venue', 'location', 'classno']) || 'Room No. C1';
+          const batch = getRowVal(row, ['class', 'batch', 'section', 'coursebatch', 'semester', 'program']) || 'FYUGP 1st Sem';
+          const dept = getRowVal(row, ['department', 'dept', 'branch']) || facMatch?.department || 'Commerce';
+
+          const cycleVal = getRowVal(row, ['semestercycle', 'cycle', 'term']);
+          const semesterCycle = (cycleVal && (cycleVal.toLowerCase().includes('even') ? 'Even' : 'Odd')) || activeSemesterCycle;
+
+          const progSem = getRowVal(row, ['programsemester', 'program', 'sem']) || 'FYUGP 1st Semester';
+          const category = getRowVal(row, ['papercategory', 'category', 'type', 'papertype']) || 'Major';
+          const notes = getRowVal(row, ['notes', 'remarks']);
 
           return {
+            id: `tt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
             facultyId: facMatch?.id || 'fac_1',
             facultyName: facMatch?.name || facName,
-            subjectCode: row['Subject Code'] || row['subjectCode'] || 'CS101',
-            subjectName: row['Subject Name'] || row['subjectName'] || 'Course Lecture',
-            room: row['Room'] || row['room'] || 'Room No. C1',
-            day: (row['Day'] || row['day'] || 'Monday') as DayOfWeek,
-            startTime: row['Start Time'] || row['startTime'] || '08:00',
-            endTime: row['End Time'] || row['endTime'] || '09:00',
-            batch: row['Batch'] || row['batch'] || 'FYUGP 1st Sem CS',
-            department: row['Department'] || row['department'] || facMatch?.department || 'Computer Science',
-            semesterCycle: (row['Semester Cycle'] || row['semesterCycle'] || activeSemesterCycle) as 'Odd' | 'Even',
-            programSemester: row['Program Semester'] || row['programSemester'] || 'FYUGP 1st Semester',
-            paperCategory: (row['Paper Category'] || row['paperCategory'] || 'Major') as any,
-            notes: row['Notes'] || row['notes'] || '',
+            subjectCode: subjCode,
+            subjectName: subjName,
+            room,
+            day,
+            startTime,
+            endTime,
+            batch,
+            department: dept,
+            semesterCycle: semesterCycle as 'Odd' | 'Even',
+            programSemester: progSem,
+            paperCategory: category as any,
+            notes,
           };
         });
 
@@ -1843,43 +2119,534 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         </div>
       )}
 
-      {/* ===================== TAB 4: CONFLICTS DETECTOR ===================== */}
+      {/* ===================== TAB 4: VISUAL CONFLICT CHECKER & AUTO-RESOLUTION ===================== */}
       {activeAdminTab === 'conflicts' && (
-        <div className="space-y-4">
-          <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700">
-            <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
-              <AlertTriangle className="w-5 h-5 text-amber-400" />
-              <span>Double-Booking & Conflict Detector Engine</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Automated validation checks for overlapping faculty schedules or duplicate room assignments.
-            </p>
+        <div className="space-y-6">
+          {/* Notification Banner Modal/Toast */}
+          {resolutionNotice && (
+            <div
+              className={`p-4 rounded-2xl border flex items-start justify-between space-x-3 shadow-xl transition-all animate-fadeIn ${
+                resolutionNotice.type === 'success'
+                  ? 'bg-emerald-950/80 border-emerald-500/60 text-emerald-100'
+                  : 'bg-indigo-950/80 border-indigo-500/60 text-indigo-100'
+              }`}
+            >
+              <div className="flex items-start space-x-3">
+                <CheckCircle
+                  className={`w-5 h-5 shrink-0 mt-0.5 ${
+                    resolutionNotice.type === 'success' ? 'text-emerald-400' : 'text-indigo-400'
+                  }`}
+                />
+                <div>
+                  <h4 className="font-heading font-extrabold text-sm">{resolutionNotice.title}</h4>
+                  <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{resolutionNotice.message}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setResolutionNotice(null)}
+                className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Top Control & Hero Banner */}
+          <div className="bg-slate-800/90 rounded-2xl p-6 border border-slate-700 shadow-xl space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-2 text-rose-400">
+                  <AlertTriangle className="w-6 h-6 animate-pulse" />
+                  <h3 className="font-heading font-extrabold text-xl text-white">
+                    Visual Conflict Checker & Automatic Resolution Engine
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Real-time double-booking detection across faculty, room allocations, and student batches with 1-click automatic resolution suggestions.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleAutoResolveAllRoomClashes}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center space-x-2 cursor-pointer"
+                  title="Automatically assign vacant rooms to all room double-bookings"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                  <span>Auto-Resolve All Room Clashes</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (conflicts.length === 0) {
+                      alert('No active conflicts to report to Academic Coordinator.');
+                      return;
+                    }
+                    handleAlertCoordinatorForConflict(conflicts[0]);
+                  }}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center space-x-2 cursor-pointer"
+                >
+                  <Send className="w-4 h-4 text-cyan-200" />
+                  <span>Notify Coordinator All Clashes</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics Dashboard Summary Bar */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-2">
+              <div className="bg-slate-900/90 p-3.5 rounded-xl border border-rose-500/40">
+                <div className="text-[10px] font-bold text-rose-300 uppercase tracking-wider">Total Conflicts</div>
+                <div className="text-xl font-mono font-extrabold text-rose-400">{conflicts.length} Clashes</div>
+              </div>
+
+              <div className="bg-slate-900/90 p-3.5 rounded-xl border border-amber-500/40">
+                <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">Faculty Clashes</div>
+                <div className="text-xl font-mono font-extrabold text-amber-400">
+                  {conflicts.filter((c) => c.type === 'faculty').length}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 p-3.5 rounded-xl border border-blue-500/40">
+                <div className="text-[10px] font-bold text-blue-300 uppercase tracking-wider">Room Clashes</div>
+                <div className="text-xl font-mono font-extrabold text-blue-400">
+                  {conflicts.filter((c) => c.type === 'room').length}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 p-3.5 rounded-xl border border-purple-500/40">
+                <div className="text-[10px] font-bold text-purple-300 uppercase tracking-wider">Batch Clashes</div>
+                <div className="text-xl font-mono font-extrabold text-purple-400">
+                  {conflicts.filter((c) => c.type === 'batch').length}
+                </div>
+              </div>
+
+              <div className="bg-slate-900/90 p-3.5 rounded-xl border border-emerald-500/40 col-span-2 md:col-span-1">
+                <div className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">Auto-Resolvable</div>
+                <div className="text-xl font-mono font-extrabold text-emerald-400">
+                  {
+                    conflicts.filter(
+                      (c) =>
+                        c.type === 'room' &&
+                        getAvailableRoomsForSlot(c.entry2.day, c.entry2.startTime, c.entry2.endTime, c.entry2.room).length > 0
+                    ).length
+                  }{' '}
+                  Ready
+                </div>
+              </div>
+            </div>
           </div>
 
+          {/* WEEKLY VISUAL MATRIX / HEATMAP GRID */}
+          <div className="bg-slate-800/90 rounded-2xl p-5 border border-slate-700 space-y-3 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Grid className="w-5 h-5 text-amber-400" />
+                <h4 className="font-heading font-extrabold text-base text-white">
+                  Weekly Timetable Clash Heatmap
+                </h4>
+              </div>
+              <span className="text-xs text-slate-400">Click any slot below to filter specific clashes</span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-center text-xs text-slate-300 border-collapse">
+                <thead>
+                  <tr className="bg-slate-900 border-b border-slate-700">
+                    <th className="p-2.5 text-left font-bold text-slate-400">Day / Time</th>
+                    {HOURLY_TIME_SLOTS.map((slot) => (
+                      <th key={slot.label} className="p-2 text-[11px] font-semibold text-slate-300 min-w-[90px]">
+                        {slot.startTime} - {slot.endTime}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-700/60">
+                  {DAYS_OF_WEEK.map((day) => (
+                    <tr key={day} className="hover:bg-slate-700/20">
+                      <td className="p-2.5 text-left font-bold text-white bg-slate-900/60">{day}</td>
+                      {HOURLY_TIME_SLOTS.map((slot) => {
+                        const slotConflicts = conflicts.filter((c) => {
+                          const e1 = c.entry1;
+                          if (e1.day !== day) return false;
+                          const sMin = parseTimeToMinutes(slot.startTime);
+                          const eMin = parseTimeToMinutes(slot.endTime);
+                          const e1Start = parseTimeToMinutes(e1.startTime);
+                          const e1End = parseTimeToMinutes(e1.endTime);
+                          return e1Start < eMin && e1End > sMin;
+                        });
+
+                        const isSelectedSlot = conflictDayFilter === day && conflictSlotFilter === slot.startTime;
+
+                        return (
+                          <td key={slot.label} className="p-1">
+                            {slotConflicts.length > 0 ? (
+                              <button
+                                onClick={() => {
+                                  setConflictDayFilter(day);
+                                  setConflictSlotFilter(slot.startTime);
+                                }}
+                                className={`w-full py-2 px-1 rounded-xl font-bold text-[10px] flex flex-col items-center justify-center space-y-0.5 transition-all cursor-pointer border ${
+                                  isSelectedSlot
+                                    ? 'bg-rose-600 text-white ring-2 ring-rose-400 scale-105 shadow-lg'
+                                    : 'bg-rose-950/80 text-rose-300 border-rose-500/60 hover:bg-rose-900'
+                                }`}
+                              >
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                                <span>
+                                  {slotConflicts.length} Clash{slotConflicts.length > 1 ? 'es' : ''}
+                                </span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setConflictDayFilter(day);
+                                  setConflictSlotFilter(slot.startTime);
+                                }}
+                                className={`w-full py-2 px-1 rounded-xl text-[10px] font-semibold transition-all border ${
+                                  isSelectedSlot
+                                    ? 'bg-indigo-600 text-white border-indigo-400'
+                                    : 'bg-slate-900/50 text-slate-500 border-slate-800 hover:text-slate-300'
+                                }`}
+                              >
+                                ✓ Clear
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* FILTER BAR & SEARCH */}
+          <div className="bg-slate-800/90 rounded-2xl p-4 border border-slate-700 flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-300 flex items-center space-x-1">
+                <Filter className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Type:</span>
+              </span>
+              {(['all', 'faculty', 'room', 'batch'] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setConflictTypeFilter(t)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold capitalize transition-all cursor-pointer ${
+                    conflictTypeFilter === t
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-900 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {t === 'all' ? 'All Types' : `${t} Clashes`}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={conflictDayFilter}
+                onChange={(e) => setConflictDayFilter(e.target.value)}
+                className="bg-slate-900 text-white text-xs font-bold rounded-xl px-3 py-1.5 border border-slate-700 focus:outline-none"
+              >
+                <option value="All">All Days</option>
+                {DAYS_OF_WEEK.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={conflictDeptFilter}
+                onChange={(e) => setConflictDeptFilter(e.target.value)}
+                className="bg-slate-900 text-white text-xs font-bold rounded-xl px-3 py-1.5 border border-slate-700 focus:outline-none"
+              >
+                <option value="All">All Departments</option>
+                {activeDepartmentsList.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+
+              {(conflictDayFilter !== 'All' ||
+                conflictSlotFilter !== 'All' ||
+                conflictDeptFilter !== 'All' ||
+                conflictTypeFilter !== 'all') && (
+                <button
+                  onClick={() => {
+                    setConflictDayFilter('All');
+                    setConflictSlotFilter('All');
+                    setConflictDeptFilter('All');
+                    setConflictTypeFilter('all');
+                  }}
+                  className="px-2.5 py-1.5 bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white rounded-xl text-xs font-bold transition-all"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* DETAILED CONFLICT CARDS LIST */}
           {conflicts.length === 0 ? (
-            <div className="bg-slate-800/40 border border-slate-700 rounded-2xl p-8 text-center space-y-2">
-              <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
-              <h4 className="font-bold text-white text-base">No Schedule Conflicts Detected!</h4>
-              <p className="text-xs text-slate-400">
-                All faculty assignments and room allocations are 100% clash-free.
+            <div className="bg-slate-800/40 border border-slate-700 rounded-2xl p-10 text-center space-y-3 shadow-inner">
+              <CheckCircle className="w-12 h-12 text-emerald-400 mx-auto" />
+              <h4 className="font-heading font-extrabold text-white text-lg">100% Clash-Free Timetable!</h4>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                No overlapping faculty schedules, double-booked classrooms, or batch timing conflicts detected in the current active routine.
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {conflicts.map((conf) => (
-                <div
-                  key={conf.id}
-                  className="bg-rose-950/30 border border-rose-500/50 rounded-2xl p-4 text-white space-y-2 shadow-lg"
-                >
-                  <div className="flex items-center space-x-2 text-rose-300 font-bold text-sm">
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
-                    <span>
-                      {conf.type === 'faculty' ? 'Faculty Double-Booking Clashing' : 'Room Double-Booking Clashing'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-200">{conf.description}</p>
-                </div>
-              ))}
+            <div className="space-y-5">
+              {conflicts
+                .filter((conf) => {
+                  if (conflictTypeFilter !== 'all' && conf.type !== conflictTypeFilter) return false;
+                  if (conflictDayFilter !== 'All' && conf.entry1.day !== conflictDayFilter) return false;
+                  if (conflictSlotFilter !== 'All' && conf.entry1.startTime !== conflictSlotFilter) return false;
+                  if (
+                    conflictDeptFilter !== 'All' &&
+                    conf.entry1.department !== conflictDeptFilter &&
+                    conf.entry2.department !== conflictDeptFilter
+                  )
+                    return false;
+                  return true;
+                })
+                .map((conf, index) => {
+                  const e1 = conf.entry1;
+                  const e2 = conf.entry2;
+                  const availableRoomsForE2 = getAvailableRoomsForSlot(e2.day, e2.startTime, e2.endTime, e2.room);
+                  const availableSlotsForE2 = getFreeTimeSlotsForEntry(e2);
+                  const availableFacultyForE2 = getFreeFacultyForSlot(e2);
+
+                  return (
+                    <div
+                      key={conf.id || index}
+                      className="bg-slate-800/95 border-2 border-rose-500/50 rounded-2xl p-5 text-white space-y-4 shadow-xl transition-all hover:border-rose-400"
+                    >
+                      {/* Conflict Card Header */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-700">
+                        <div className="flex items-center space-x-2">
+                          <span
+                            className={`px-2.5 py-1 rounded-xl text-xs font-extrabold uppercase tracking-wide ${
+                              conf.type === 'faculty'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : conf.type === 'room'
+                                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                                : 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                            }`}
+                          >
+                            ⚠️{' '}
+                            {conf.type === 'faculty'
+                              ? 'Faculty Double-Booking'
+                              : conf.type === 'room'
+                              ? 'Room Double-Booking'
+                              : 'Batch Class Overlap'}
+                          </span>
+                          <span className="text-xs font-bold text-slate-300 flex items-center space-x-1">
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span>
+                              {e1.day}, {e1.startTime} - {e1.endTime}
+                            </span>
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleAlertCoordinatorForConflict(conf)}
+                          className="px-3 py-1 bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 self-start sm:self-auto cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Alert Coordinator</span>
+                        </button>
+                      </div>
+
+                      {/* Conflict Description Banner */}
+                      <p className="text-xs text-rose-200 bg-rose-950/50 p-2.5 rounded-xl border border-rose-500/30 font-medium">
+                        {conf.description}
+                      </p>
+
+                      {/* Side-by-Side Comparison Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Entry 1 Card */}
+                        <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/80 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-extrabold text-emerald-400 uppercase tracking-wider">
+                              Class Schedule A
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">{e1.department}</span>
+                          </div>
+                          <h5 className="font-heading font-extrabold text-sm text-white">
+                            {e1.subjectName} ({e1.subjectCode})
+                          </h5>
+                          <div className="text-xs space-y-1 text-slate-300">
+                            <div>
+                              <strong>Faculty:</strong> {e1.facultyName}
+                            </div>
+                            <div>
+                              <strong>Room:</strong>{' '}
+                              <span className="font-mono text-cyan-300 font-bold">{e1.room}</span>
+                            </div>
+                            <div>
+                              <strong>Batch:</strong> {e1.batch}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Entry 2 Card */}
+                        <div className="bg-slate-900/90 p-4 rounded-xl border border-rose-500/40 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-extrabold text-rose-400 uppercase tracking-wider">
+                              Class Schedule B (Conflicting)
+                            </span>
+                            <span className="text-[10px] font-mono text-slate-400">{e2.department}</span>
+                          </div>
+                          <h5 className="font-heading font-extrabold text-sm text-white">
+                            {e2.subjectName} ({e2.subjectCode})
+                          </h5>
+                          <div className="text-xs space-y-1 text-slate-300">
+                            <div>
+                              <strong>Faculty:</strong> {e2.facultyName}
+                            </div>
+                            <div>
+                              <strong>Room:</strong>{' '}
+                              <span className="font-mono text-rose-300 font-bold">{e2.room}</span>
+                            </div>
+                            <div>
+                              <strong>Batch:</strong> {e2.batch}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AUTOMATIC RESOLUTION SUGGESTIONS BOX */}
+                      <div className="bg-slate-900/95 p-4 rounded-xl border border-emerald-500/40 space-y-3">
+                        <div className="flex items-center space-x-2 text-emerald-400 font-extrabold text-xs uppercase tracking-wider">
+                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          <span>Automated Smart Resolution Options</span>
+                        </div>
+
+                        {/* Option 1: Move to Vacant Room */}
+                        {conf.type === 'room' && (
+                          <div className="space-y-1.5">
+                            <div className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                              <Building className="w-3.5 h-3.5 text-cyan-400" />
+                              <span>Option A: Move Class B ("{e2.subjectName}") to Vacant Campus Room:</span>
+                            </div>
+                            {availableRoomsForE2.length === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic">
+                                No vacant classrooms available during this exact time slot.
+                              </p>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {availableRoomsForE2.slice(0, 5).map((rName) => (
+                                  <button
+                                    key={rName}
+                                    onClick={() => handleMoveToRoom(e2, rName)}
+                                    className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                                  >
+                                    <span>Move to {rName}</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Option 2: Reschedule Slot */}
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Option B: Reschedule Class B ("{e2.subjectName}") to Open Time Slot:</span>
+                          </div>
+                          {availableSlotsForE2.length === 0 ? (
+                            <p className="text-[11px] text-slate-400 italic">No open time slots available on {e2.day}.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {availableSlotsForE2.slice(0, 4).map((slot) => (
+                                <button
+                                  key={slot.label}
+                                  onClick={() => handleRescheduleTime(e2, slot.startTime, slot.endTime)}
+                                  className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                                >
+                                  <span>
+                                    Shift to {slot.startTime} - {slot.endTime}
+                                  </span>
+                                  <ArrowRight className="w-3 h-3" />
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Option 3: Substitute Faculty (for faculty clashes) */}
+                        {conf.type === 'faculty' && (
+                          <div className="space-y-1.5">
+                            <div className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                              <Users className="w-3.5 h-3.5 text-purple-400" />
+                              <span>Option C: Reassign Class B to Available Department Faculty:</span>
+                            </div>
+                            {availableFacultyForE2.length === 0 ? (
+                              <p className="text-[11px] text-slate-400 italic">
+                                All department faculty members are busy during this slot.
+                              </p>
+                            ) : (
+                              <div className="flex flex-wrap gap-2">
+                                {availableFacultyForE2.slice(0, 3).map((f) => (
+                                  <button
+                                    key={f.id}
+                                    onClick={() => handleReassignFacultyMember(e2, f)}
+                                    className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                                  >
+                                    <span>Assign {f.name}</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Quick Action Footer */}
+                        <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-800">
+                          <button
+                            onClick={() => {
+                              setEditingEntryId(e2.id);
+                              setFormFacultyId(e2.facultyId);
+                              setFormSubjectCode(e2.subjectCode);
+                              setFormSubjectName(e2.subjectName);
+                              setFormRoom(e2.room);
+                              setFormDay(e2.day);
+                              setFormStartTime(e2.startTime);
+                              setFormEndTime(e2.endTime);
+                              setFormBatch(e2.batch);
+                              setFormDepartment(e2.department);
+                              setIsEntryModalOpen(true);
+                            }}
+                            className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>Edit Class B</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete conflicting entry "${e2.subjectName}"?`)) {
+                                onDeleteEntry(e2.id);
+                              }
+                            }}
+                            className="px-3 py-1 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white text-xs font-bold rounded-lg transition-all flex items-center space-x-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>Delete Entry B</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>

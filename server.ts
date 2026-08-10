@@ -303,18 +303,22 @@ async function startServer() {
     const created: TimetableEntry[] = [];
     entries.forEach((e: Partial<TimetableEntry>) => {
       const entry: TimetableEntry = {
-        id: `tt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: e.id || `tt_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
         facultyId: e.facultyId || 'fac_1',
-        facultyName: e.facultyName || 'Dr. Sarah Jenkins',
+        facultyName: e.facultyName || 'Faculty Member',
         subjectCode: e.subjectCode || 'CS101',
         subjectName: e.subjectName || 'General Subject',
-        room: e.room || 'LH-101',
+        room: e.room || 'Room No. C1',
         day: e.day || 'Monday',
         startTime: e.startTime || '09:00',
         endTime: e.endTime || '10:15',
-        batch: e.batch || 'CS-3A',
+        batch: e.batch || 'FYUGP',
         department: e.department || 'Computer Science',
+        semesterCycle: e.semesterCycle,
+        programSemester: e.programSemester,
+        paperCategory: e.paperCategory,
         notes: e.notes || '',
+        isSubstitute: e.isSubstitute || false,
       };
       timetableList.push(entry);
       created.push(entry);

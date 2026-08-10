@@ -227,6 +227,16 @@ export function detectConflicts(entries: TimetableEntry[]): ScheduleConflict[] {
             description: `Room "${e1.room}" is double-booked for "${e1.subjectName}" (${e1.facultyName}) and "${e2.subjectName}" (${e2.facultyName}) on ${e1.day} (${e1.startTime}-${e1.endTime})`,
           });
         }
+
+        if (e1.batch && e2.batch && e1.batch.trim().toLowerCase() === e2.batch.trim().toLowerCase()) {
+          conflicts.push({
+            id: `conflict_batch_${e1.id}_${e2.id}`,
+            type: 'batch',
+            entry1: e1,
+            entry2: e2,
+            description: `Batch/Class "${e1.batch}" is double-booked for both "${e1.subjectName}" (${e1.facultyName}, ${e1.room}) and "${e2.subjectName}" (${e2.facultyName}, ${e2.room}) on ${e1.day} (${e1.startTime}-${e1.endTime})`,
+          });
+        }
       }
     }
   }
