@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User, RoutineVersion, RoutineBackup } from '../types';
 import { AdminNaacReports } from './AdminNaacReports';
+import { AdminSqliteIntegrityView } from './AdminSqliteIntegrityView';
 import {
   DAYS_OF_WEEK,
   DEPARTMENTS_LIST,
@@ -105,7 +106,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 }) => {
   // Navigation sub-tabs inside Admin
   const [activeAdminTab, setActiveAdminTab] = useState<
-    'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access' | 'backup_safeguards'
+    'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access' | 'backup_safeguards' | 'sqlite_integrity'
   >('grid');
 
   // Raw Uploaded File Retention State
@@ -1359,6 +1360,18 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             >
               <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
               <span>Backups & Recovery</span>
+            </button>
+
+            <button
+              onClick={() => setActiveAdminTab('sqlite_integrity')}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeAdminTab === 'sqlite_integrity'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-blue-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Database Integrity</span>
             </button>
 
             {isSuperAdmin && (
@@ -3949,6 +3962,9 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           </div>
         </div>
       )}
+
+      {/* ===================== TAB: SQLITE SCHEMA & DATABASE INTEGRITY AUDITS ===================== */}
+      {activeAdminTab === 'sqlite_integrity' && <AdminSqliteIntegrityView />}
 
       {/* Snapshot / Version Preview Modal */}
       {previewingSnapshot && (

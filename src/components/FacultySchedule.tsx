@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TimetableEntry, Faculty, DayOfWeek, User, Student } from '../types';
 import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName } from '../utils/timeUtils';
+import { ClassQrAttendanceModal } from './ClassQrAttendanceModal';
 import {
   Calendar,
   Clock,
@@ -22,6 +23,7 @@ import {
   Check,
   X,
   UserCheck,
+  QrCode,
 } from 'lucide-react';
 
 interface FacultyScheduleProps {
@@ -96,6 +98,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
   const [jumpDate, setJumpDate] = useState<string>('');
+  const [qrModalEntry, setQrModalEntry] = useState<TimetableEntry | null>(null);
 
   const currentFaculty = facultyList.find((f) => f.id === selectedFacultyId) || facultyList[0];
 
@@ -674,7 +677,16 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                       </div>
 
                       {/* Right Actions */}
-                      <div className="flex items-center space-x-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-700/60">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-700/60">
+                        <button
+                          onClick={() => setQrModalEntry(entry)}
+                          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-cyan-300 hover:text-white text-xs font-bold border border-slate-700/80 flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm"
+                          title="Generate QR code for student live attendance scan"
+                        >
+                          <QrCode className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>Attendance QR</span>
+                        </button>
+
                         {onNavigateToDiary && (
                           <button
                             onClick={() => onNavigateToDiary(entry)}
@@ -862,8 +874,17 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                               <span className="font-extrabold text-indigo-200">{getEnrolledStudentCount(entry, students)} Students</span>
                             </div>
 
-                            {/* Direct Fill Class Diary or Alert */}
+                            {/* Direct Fill Class Diary, QR Code or Alert */}
                             <div className="flex items-center space-x-1 pt-1">
+                              <button
+                                onClick={() => setQrModalEntry(entry)}
+                                className="flex-1 py-1 bg-slate-950 hover:bg-slate-800 text-cyan-300 text-[10px] font-bold rounded border border-slate-700/80 flex items-center justify-center space-x-1 transition-all cursor-pointer"
+                                title="Generate QR Code"
+                              >
+                                <QrCode className="w-3 h-3 text-cyan-400" />
+                                <span>QR</span>
+                              </button>
+
                               {onNavigateToDiary && (
                                 <button
                                   onClick={() => onNavigateToDiary(entry)}
@@ -906,6 +927,17 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
             })}
           </div>
         </div>
+      )}
+
+      {/* QR Attendance Code Generator Modal */}
+      {qrModalEntry && (
+        <ClassQrAttendanceModal
+          entry={qrModalEntry}
+          facultyName={currentFaculty?.name || 'Faculty Member'}
+          date={currentDate}
+          students={students}
+          onClose={() => setQrModalEntry(null)}
+        />
       )}
     </div>
   );

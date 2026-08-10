@@ -67,6 +67,7 @@ import { GoogleCalendarView } from './components/GoogleCalendarView';
 import { ComplianceResearchView } from './components/ComplianceResearchView';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { AlarmModal } from './components/AlarmModal';
+import { FooterSyncStatus } from './components/FooterSyncStatus';
 import { ActiveAlarm } from './types';
 
 
@@ -118,6 +119,12 @@ export default function App() {
     try {
       localStorage.setItem('classpilot_students', JSON.stringify(updated));
     } catch (e) {}
+
+    fetch('/api/students/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ students: updated, replaceExisting: true }),
+    }).catch((e) => console.warn('Sync students with SQLite error:', e));
   };
 
   // Read persisted user session from localStorage or default to null for Landing Page
@@ -271,11 +278,10 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setTimetable((prev) => {
-            const hasLocal = localStorage.getItem('classpilot_timetable') !== null;
-            if (hasLocal && prev.length > 0) return prev;
-            return data;
-          });
+          setTimetable(data);
+          try {
+            localStorage.setItem('classpilot_timetable', JSON.stringify(data));
+          } catch (e) {}
         }
       })
       .catch((err) => console.log('Loaded default timetable state'));
@@ -284,11 +290,10 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setFacultyList((prev) => {
-            const hasLocal = localStorage.getItem('classpilot_faculty_list') !== null;
-            if (hasLocal && prev.length > 0) return prev;
-            return data;
-          });
+          setFacultyList(data);
+          try {
+            localStorage.setItem('classpilot_faculty_list', JSON.stringify(data));
+          } catch (e) {}
         }
       })
       .catch((err) => console.log('Loaded default faculty state'));
@@ -297,14 +302,25 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
-          setRoomList((prev) => {
-            const hasLocal = localStorage.getItem('classpilot_room_list') !== null;
-            if (hasLocal && prev.length > 0) return prev;
-            return data;
-          });
+          setRoomList(data);
+          try {
+            localStorage.setItem('classpilot_room_list', JSON.stringify(data));
+          } catch (e) {}
         }
       })
       .catch((err) => console.log('Loaded default room state'));
+
+    fetch('/api/students')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setStudents(data);
+          try {
+            localStorage.setItem('classpilot_students', JSON.stringify(data));
+          } catch (e) {}
+        }
+      })
+      .catch((err) => console.log('Loaded default student state'));
 
     // Listen for PWA Install Prompt
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -1110,6 +1126,18 @@ export default function App() {
         activeAlarm={activeAlarm}
         onStop={handleStopAlarm}
         onSnooze={handleSnoozeAlarm}
+      />
+
+      {/* Subtle Sync Status Footer */}
+      <FooterSyncStatus
+        timetableCount={timetable.length}
+        facultyCount={facultyList.length}
+        studentCount={students.length}
+        onRefreshData={() => {
+          fetch('/api/timetable').then(r => r.json()).then(d => Array.isArray(d) && setTimetable(d)).catch(e => {});
+          fetch('/api/faculty').then(r => r.json()).then(d => Array.isArray(d) && setFacultyList(d)).catch(e => {});
+          fetch('/api/students').then(r => r.json()).then(d => Array.isArray(d) && setStudents(d)).catch(e => {});
+        }}
       />
     </div>
   );
