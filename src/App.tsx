@@ -460,18 +460,42 @@ export default function App() {
 
   // --- CRUD API HANDLERS ---
   const handleAddEntry = async (entryData: Partial<TimetableEntry>) => {
-    const fsResult = await addTimetableEntryToFirestore(entryData);
-    if (fsResult.success && fsResult.entry) {
-      setTimetable((prev) => [...prev, fsResult.entry!]);
-    } else {
-      console.warn('Firestore add entry error:', fsResult.error);
-    }
+    const newEntry: TimetableEntry = {
+      id: entryData.id || `tt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      facultyId: entryData.facultyId || 'fac_1',
+      facultyName: entryData.facultyName || 'Faculty Member',
+      subjectCode: entryData.subjectCode || 'CS101',
+      subjectName: entryData.subjectName || 'Course',
+      room: entryData.room || 'Room No. C1',
+      day: entryData.day || 'Monday',
+      startTime: entryData.startTime || '08:00',
+      endTime: entryData.endTime || '09:00',
+      batch: entryData.batch || 'FYUGP',
+      department: entryData.department || 'Computer Science',
+      semesterCycle: entryData.semesterCycle || 'Odd',
+      programSemester: entryData.programSemester || 'FYUGP 1st Semester',
+      paperCategory: entryData.paperCategory || 'Major',
+      notes: entryData.notes || '',
+      isSubstitute: entryData.isSubstitute || false,
+    };
+
+    setTimetable((prev) => {
+      const updated = [...prev, newEntry];
+      try {
+        localStorage.setItem('classpilot_timetable', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    addTimetableEntryToFirestore(newEntry).catch((err) =>
+      console.warn('Firestore add entry background notice:', err)
+    );
 
     try {
       await fetch('/api/timetable', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entryData),
+        body: JSON.stringify(newEntry),
       });
     } catch (err) {
       console.error('Failed to add entry via API:', err);
@@ -479,8 +503,17 @@ export default function App() {
   };
 
   const handleUpdateEntry = async (id: string, entryData: Partial<TimetableEntry>) => {
-    setTimetable((prev) => prev.map((t) => (t.id === id ? { ...t, ...entryData } : t)));
-    await updateTimetableEntryInFirestore(id, entryData);
+    setTimetable((prev) => {
+      const updated = prev.map((t) => (t.id === id ? { ...t, ...entryData } : t));
+      try {
+        localStorage.setItem('classpilot_timetable', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    updateTimetableEntryInFirestore(id, entryData).catch((err) =>
+      console.warn('Firestore update entry notice:', err)
+    );
 
     try {
       await fetch(`/api/timetable/${id}`, {
@@ -663,6 +696,60 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newFac),
     }).catch((e) => console.warn('Express faculty sync notice:', e));
+  };
+
+  const handleUpdateFaculty = (facId: string, updatedData: Partial<Faculty>) => {
+    setFacultyList((prev) => {
+      const oldFac = prev.find((f) => f.id === facId);
+      const oldName = oldFac?.name;
+
+      const updated = prev.map((f) => {
+        if (f.id === facId) {
+          return {
+            ...f,
+            ...updatedData,
+            phone: updatedData.phone || (updatedData as any).whatsappPhone || f.phone,
+            whatsappPhone: updatedData.whatsappPhone || updatedData.phone || f.whatsappPhone,
+          };
+        }
+        return f;
+      });
+
+      try {
+        localStorage.setItem('classpilot_faculty_list', JSON.stringify(updated));
+      } catch (e) {}
+
+      // If faculty name changed, synchronize name across active timetable routine entries
+      if (updatedData.name && oldName && updatedData.name.trim() !== oldName.trim()) {
+        const newName = updatedData.name.trim();
+        setTimetable((prevTT) => {
+          const updatedTT = prevTT.map((item) => {
+            if (item.facultyId === facId || item.facultyName.toLowerCase().trim() === oldName.toLowerCase().trim()) {
+              return { ...item, facultyName: newName };
+            }
+            return item;
+          });
+          try {
+            localStorage.setItem('classpilot_timetable', JSON.stringify(updatedTT));
+          } catch (e) {}
+          saveTimetableToFirestore(updatedTT, true).catch((e) => console.warn('Sync timetable faculty name error:', e));
+          return updatedTT;
+        });
+      }
+
+      const updatedFacObj = updated.find((f) => f.id === facId);
+      if (updatedFacObj) {
+        saveFacultyToFirestore(updatedFacObj).catch((e) => console.warn('Firestore faculty update notice:', e));
+
+        fetch(`/api/faculty/${facId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedFacObj),
+        }).catch((e) => console.warn('Express faculty update notice:', e));
+      }
+
+      return updated;
+    });
   };
 
   const handleDeleteFaculty = (facId: string) => {
@@ -880,6 +967,7 @@ export default function App() {
             onRollbackRoutine={handleRollbackRoutine}
             onCreateManualBackup={handleCreateManualBackup}
             onAddFaculty={handleAddFaculty}
+            onUpdateFaculty={handleUpdateFaculty}
             onDeleteFaculty={handleDeleteFaculty}
             onClearAllFaculty={handleClearAllFaculty}
             onAddRoom={handleAddRoom}

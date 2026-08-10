@@ -217,15 +217,35 @@ async function startServer() {
 
   app.post('/api/faculty', (req, res) => {
     const newFaculty: Faculty = {
-      id: `fac_${Date.now()}`,
+      id: req.body.id || `fac_${Date.now()}`,
       name: req.body.name,
       email: req.body.email,
       department: req.body.department || 'Computer Science',
       designation: req.body.designation || 'Lecturer',
       phone: req.body.phone,
+      whatsappPhone: req.body.whatsappPhone || req.body.phone,
+      employeeId: req.body.employeeId,
+      isVerified: true,
     };
     facultyList.push(newFaculty);
     res.json(newFaculty);
+  });
+
+  app.put('/api/faculty/:id', (req, res) => {
+    const { id } = req.params;
+    const index = facultyList.findIndex((f) => f.id === id);
+    if (index === -1) {
+      res.status(404).json({ error: 'Faculty member not found' });
+      return;
+    }
+    facultyList[index] = { ...facultyList[index], ...req.body };
+    res.json(facultyList[index]);
+  });
+
+  app.delete('/api/faculty/:id', (req, res) => {
+    const { id } = req.params;
+    facultyList = facultyList.filter((f) => f.id !== id);
+    res.json({ success: true, id });
   });
 
   // Rooms API

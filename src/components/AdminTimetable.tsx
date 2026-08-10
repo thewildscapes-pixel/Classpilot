@@ -69,6 +69,7 @@ interface AdminTimetableProps {
   onRollbackRoutine?: (entriesSnapshot: TimetableEntry[], versionLabel: string) => Promise<void> | void;
   onCreateManualBackup?: (description: string) => Promise<void> | void;
   onAddFaculty: (faculty: Partial<Faculty>) => void;
+  onUpdateFaculty?: (id: string, faculty: Partial<Faculty>) => void;
   onDeleteFaculty?: (id: string) => void;
   onClearAllFaculty?: () => void;
   onAddRoom: (room: Partial<Room>) => void;
@@ -92,6 +93,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   onRollbackRoutine,
   onCreateManualBackup,
   onAddFaculty,
+  onUpdateFaculty,
   onDeleteFaculty,
   onClearAllFaculty,
   onAddRoom,
@@ -429,6 +431,53 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [newFacName, setNewFacName] = useState<string>('');
   const [newFacEmail, setNewFacEmail] = useState<string>('');
   const [newFacDept, setNewFacDept] = useState<string>('Computer Science');
+
+  // Faculty Edit States
+  const [editingFaculty, setEditingFaculty] = useState<Faculty | null>(null);
+  const [isFacultyEditModalOpen, setIsFacultyEditModalOpen] = useState<boolean>(false);
+  const [editFacName, setEditFacName] = useState<string>('');
+  const [editFacEmail, setEditFacEmail] = useState<string>('');
+  const [editFacDept, setEditFacDept] = useState<string>('Computer Science');
+  const [editFacDesignation, setEditFacDesignation] = useState<string>('Assistant Professor');
+  const [editFacPhone, setEditFacPhone] = useState<string>('');
+  const [editFacEmployeeId, setEditFacEmployeeId] = useState<string>('');
+
+  const openFacultyEditModal = (fac: Faculty) => {
+    setEditingFaculty(fac);
+    setEditFacName(fac.name || '');
+    setEditFacEmail(fac.email || '');
+    setEditFacDept(fac.department || DEPARTMENTS_LIST[0] || 'Computer Science');
+    setEditFacDesignation(fac.designation || 'Assistant Professor');
+    setEditFacPhone(fac.phone || fac.whatsappPhone || '');
+    setEditFacEmployeeId(fac.employeeId || '');
+    setIsFacultyEditModalOpen(true);
+  };
+
+  const handleSaveFacultyEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFaculty) return;
+    if (!editFacName.trim()) {
+      alert('Faculty name is required.');
+      return;
+    }
+
+    const updatedData: Partial<Faculty> = {
+      name: editFacName.trim(),
+      email: editFacEmail.trim(),
+      department: editFacDept,
+      designation: editFacDesignation,
+      phone: editFacPhone.trim(),
+      whatsappPhone: editFacPhone.trim(),
+      employeeId: editFacEmployeeId.trim(),
+    };
+
+    if (onUpdateFaculty) {
+      onUpdateFaculty(editingFaculty.id, updatedData);
+    }
+    setIsFacultyEditModalOpen(false);
+    setEditingFaculty(null);
+    alert(`✅ Faculty details for "${editFacName}" updated successfully!`);
+  };
 
   const [newRoomName, setNewRoomName] = useState<string>('');
   const [newRoomBuilding, setNewRoomBuilding] = useState<string>('Science Block A');
@@ -2998,7 +3047,16 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                             </span>
                           )}
                         </td>
-                        <td className="p-3 text-right">
+                        <td className="p-3 text-right space-x-1">
+                          <button
+                            onClick={() => openFacultyEditModal(fac)}
+                            className="p-1.5 text-slate-300 hover:text-indigo-300 hover:bg-indigo-500/20 rounded-lg transition-all cursor-pointer inline-flex items-center space-x-1 font-semibold text-xs border border-slate-700 bg-slate-800/80"
+                            title="Edit Faculty Roster Details"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Edit</span>
+                          </button>
+
                           {onDeleteFaculty && (
                             <button
                               onClick={() => {
@@ -3006,10 +3064,11 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                                   onDeleteFaculty(fac.id);
                                 }
                               }}
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all cursor-pointer inline-flex items-center space-x-1 font-semibold text-xs"
                               title="Delete Faculty Member"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Delete</span>
                             </button>
                           )}
                         </td>
@@ -4158,6 +4217,133 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 <span>Confirm & Force Save (Manual Override)</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== EDIT FACULTY MEMBER MODAL ===================== */}
+      {isFacultyEditModalOpen && editingFaculty && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-white">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
+                <UserPlus className="w-5 h-5 text-indigo-400" />
+                <span>Edit Faculty Roster Details</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setIsFacultyEditModalOpen(false);
+                  setEditingFaculty(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFacultyEdit} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Full Name</label>
+                <input
+                  type="text"
+                  value={editFacName}
+                  onChange={(e) => setEditFacName(e.target.value)}
+                  placeholder="e.g. Dr. Robert Vance"
+                  className="w-full bg-slate-800 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">College Email</label>
+                <input
+                  type="email"
+                  value={editFacEmail}
+                  onChange={(e) => setEditFacEmail(e.target.value)}
+                  placeholder="e.g. r.vance@digboicollege.edu.in"
+                  className="w-full bg-slate-800 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-indigo-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Department</label>
+                  <select
+                    value={editFacDept}
+                    onChange={(e) => setEditFacDept(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    {DEPARTMENTS_LIST.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Designation</label>
+                  <select
+                    value={editFacDesignation}
+                    onChange={(e) => setEditFacDesignation(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="Professor">Professor</option>
+                    <option value="Associate Professor">Associate Professor</option>
+                    <option value="Assistant Professor">Assistant Professor</option>
+                    <option value="HOD & Associate Professor">HOD & Associate Professor</option>
+                    <option value="Lecturer">Lecturer</option>
+                    <option value="Guest Faculty">Guest Faculty</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-emerald-300 block mb-1">
+                    Pre-Reg Mobile (OTP Login)
+                  </label>
+                  <input
+                    type="text"
+                    value={editFacPhone}
+                    onChange={(e) => setEditFacPhone(e.target.value)}
+                    placeholder="e.g. 9876543210"
+                    className="w-full bg-slate-800 text-emerald-300 font-mono text-xs font-semibold rounded-xl px-3 py-2 border border-emerald-500/40 focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">Employee ID</label>
+                  <input
+                    type="text"
+                    value={editFacEmployeeId}
+                    onChange={(e) => setEditFacEmployeeId(e.target.value)}
+                    placeholder="e.g. DC-EMP-042"
+                    className="w-full bg-slate-800 text-white font-mono text-xs rounded-xl px-3 py-2 border border-slate-700 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsFacultyEditModalOpen(false);
+                    setEditingFaculty(null);
+                  }}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md cursor-pointer"
+                >
+                  Save Faculty Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
