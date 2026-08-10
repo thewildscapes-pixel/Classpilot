@@ -19,6 +19,7 @@ import {
   where,
   orderBy,
   serverTimestamp,
+  writeBatch,
   FirebaseUser,
 } from './firebase';
 import { User, TimetableEntry, ClassDiaryEntry, RoutineVersion, RoutineBackup, RawRoutineFile, Faculty, Room } from '../types';
@@ -156,23 +157,27 @@ export function listenToAuthChanges(callback: (user: User | null) => void) {
 
       if (userSnap.exists()) {
         const data = userSnap.data();
+        const userEmail = fbUser.email || data.email || '';
+        const isAdmin = userEmail.toLowerCase().includes('thewildscapes');
         callback({
           id: fbUser.uid,
           name: data.name || fbUser.displayName || 'Faculty Member',
-          email: fbUser.email || '',
+          email: userEmail,
           whatsappPhone: data.whatsappPhone || '',
-          role: data.role || 'faculty',
+          role: data.role || (isAdmin ? 'admin' : 'faculty'),
           facultyId: data.facultyId || `fac_${fbUser.uid.substring(0, 8)}`,
           department: data.department || 'Commerce',
           isVerified: true,
         });
       } else {
+        const userEmail = fbUser.email || '';
+        const isAdmin = userEmail.toLowerCase().includes('thewildscapes');
         const newUser: User = {
           id: fbUser.uid,
           name: fbUser.displayName || 'Faculty Member',
-          email: fbUser.email || '',
+          email: userEmail,
           whatsappPhone: '',
-          role: 'faculty',
+          role: isAdmin ? 'admin' : 'faculty',
           facultyId: `fac_${fbUser.uid.substring(0, 8)}`,
           department: 'Commerce',
           isVerified: true,
@@ -182,11 +187,13 @@ export function listenToAuthChanges(callback: (user: User | null) => void) {
       }
     } catch (e) {
       console.warn('Error fetching Firestore user profile:', e);
+      const userEmail = fbUser.email || '';
+      const isAdmin = userEmail.toLowerCase().includes('thewildscapes');
       callback({
         id: fbUser.uid,
         name: fbUser.displayName || 'Faculty Member',
-        email: fbUser.email || '',
-        role: 'faculty',
+        email: userEmail,
+        role: isAdmin ? 'admin' : 'faculty',
         facultyId: `fac_${fbUser.uid.substring(0, 8)}`,
         department: 'Commerce',
         isVerified: true,
@@ -256,45 +263,57 @@ export async function saveTimetableToFirestore(
 ): Promise<{ success: boolean; count: number; error?: string }> {
   try {
     if (replaceExisting) {
-      // Clear all existing documents in timetables collection
+      // Clear all existing documents in timetables collection using batched deletes
       const existingSnapshot = await getDocs(collection(db, 'timetables'));
-      const deletePromises = existingSnapshot.docs.map((docSnap) =>
-        deleteDoc(doc(db, 'timetables', docSnap.id))
-      );
-      await Promise.all(deletePromises);
+      const docs = existingSnapshot.docs;
+      for (let i = 0; i < docs.length; i += 400) {
+        const batch = writeBatch(db);
+        const chunk = docs.slice(i, i + 400);
+        chunk.forEach((docSnap) => batch.delete(docSnap.ref));
+        await batch.commit();
+      }
     }
 
-    // Write each timetable record to timetables collection in Firestore
-    const writePromises = entries.map((entry, idx) => {
-      const docId = entry.id || `tt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
-      const docRef = doc(db, 'timetables', docId);
+    // Write each timetable record in batches of 400
+    for (let i = 0; i < entries.length; i += 400) {
+      const batch = writeBatch(db);
+      const chunk = entries.slice(i, i + 400);
 
-      const cleanEntry: TimetableEntry = {
-        id: docId,
-        facultyId: entry.facultyId || 'fac_1',
-        facultyName: entry.facultyName || 'Faculty Member',
-        subjectCode: entry.subjectCode || 'CS101',
-        subjectName: entry.subjectName || 'General Subject',
-        room: entry.room || 'Room No. C1',
-        day: entry.day || 'Monday',
-        startTime: entry.startTime || '09:00',
-        endTime: entry.endTime || '10:15',
-        batch: entry.batch || 'FYUGP',
-        department: entry.department || 'Commerce',
-        semesterCycle: entry.semesterCycle || 'Odd',
-        programSemester: entry.programSemester || 'FYUGP 1st Semester',
-        paperCategory: entry.paperCategory || 'Major',
-        notes: entry.notes || '',
-        isSubstitute: entry.isSubstitute || false,
-      };
+      chunk.forEach((entry, idx) => {
+        const docId = entry.id || `tt_${Date.now()}_${i + idx}_${Math.random().toString(36).substring(2, 6)}`;
+        const docRef = doc(db, 'timetables', docId);
 
-      return setDoc(docRef, {
-        ...cleanEntry,
-        updatedAt: serverTimestamp(),
+        const cleanEntry: TimetableEntry = {
+          id: docId,
+          facultyId: entry.facultyId || 'fac_1',
+          facultyName: entry.facultyName || 'Faculty Member',
+          subjectCode: entry.subjectCode || 'CS101',
+          subjectName: entry.subjectName || 'General Subject',
+          room: entry.room || 'Room No. C1',
+          day: entry.day || 'Monday',
+          startTime: entry.startTime || '09:00',
+          endTime: entry.endTime || '10:15',
+          batch: entry.batch || 'FYUGP',
+          department: entry.department || 'Commerce',
+          semesterCycle: entry.semesterCycle || 'Odd',
+          programSemester: entry.programSemester || 'FYUGP 1st Semester',
+          paperCategory: entry.paperCategory || 'Major',
+          notes: entry.notes || '',
+          isSubstitute: Boolean(entry.isSubstitute),
+        };
+
+        // Deep sanitize to prevent any undefined fields from throwing Firestore error
+        const sanitized = JSON.parse(JSON.stringify(cleanEntry));
+
+        batch.set(docRef, {
+          ...sanitized,
+          updatedAt: serverTimestamp(),
+        });
       });
-    });
 
-    await Promise.all(writePromises);
+      await batch.commit();
+    }
+
     return { success: true, count: entries.length };
   } catch (error: any) {
     console.error('Error saving timetable batch to Firestore:', error);

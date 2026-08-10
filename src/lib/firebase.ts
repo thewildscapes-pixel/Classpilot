@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
+  setPersistence,
+  browserLocalPersistence,
   GoogleAuthProvider,
   GithubAuthProvider,
   signInWithPopup,
@@ -92,6 +94,13 @@ try {
 export const db = firestoreInstance;
 
 export const auth = getAuth(app);
+
+// Explicitly set browserLocalPersistence for durable session across page reloads/revisits
+if (typeof window !== 'undefined') {
+  setPersistence(auth, browserLocalPersistence).catch((err) => {
+    console.warn('Firebase setPersistence error:', err);
+  });
+}
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
   prompt: 'select_account',
@@ -116,8 +125,11 @@ export {
   orderBy,
   serverTimestamp,
   Timestamp,
+  writeBatch,
   signInWithPopup,
   signOut,
   onAuthStateChanged,
+  setPersistence,
+  browserLocalPersistence,
 };
 export type { FirebaseUser };

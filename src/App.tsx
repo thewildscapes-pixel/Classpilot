@@ -354,6 +354,31 @@ export default function App() {
     }
   };
 
+  // --- FIREBASE AUTH STATE LISTENER & SESSION PERSISTENCE ---
+  useEffect(() => {
+    const unsubscribeAuth = listenToAuthChanges((fbAppUser) => {
+      if (fbAppUser) {
+        console.log('[AuthPersistence] Firebase auth re-synced session for user:', fbAppUser.email);
+        const resolvedUser = resolveFacultyForUser(fbAppUser, facultyList);
+        setCurrentUser(resolvedUser);
+        if (resolvedUser.facultyId) {
+          setSelectedFacultyId(resolvedUser.facultyId);
+        }
+        try {
+          localStorage.setItem('classpilot_user_session', JSON.stringify(resolvedUser));
+        } catch (e) {
+          console.warn('LocalStorage save error:', e);
+        }
+      } else {
+        console.log('[AuthPersistence] Firebase auth state: No user signed in.');
+      }
+    });
+
+    return () => {
+      unsubscribeAuth();
+    };
+  }, [facultyList]);
+
   // Auto-sync logged-in currentUser with facultyList to ensure facultyId points directly to their official routine
   useEffect(() => {
     if (!currentUser || facultyList.length === 0) return;
@@ -396,18 +421,45 @@ export default function App() {
   const [routineVersions, setRoutineVersions] = useState<RoutineVersion[]>([]);
   const [routineBackups, setRoutineBackups] = useState<RoutineBackup[]>([]);
 
+  // Track whether Firestore real-time subscriptions have supplied data
+  const hasFirestoreTtLoaded = useRef(false);
+  const hasFirestoreFacLoaded = useRef(false);
+  const hasFirestoreRoomsLoaded = useRef(false);
+
   // --- FETCH BACKEND DATA ON MOUNT & REALTIME FIRESTORE TIMETABLE ---
   useEffect(() => {
     // Firestore Real-Time Timetable Listener (no manual refresh needed)
     const unsubscribeTimetable = subscribeToTimetableRealtime((entries) => {
-      if (entries && entries.length > 0) {
-        setTimetable(entries);
-        try {
-          localStorage.setItem('classpilot_timetable', JSON.stringify(entries));
-        } catch (e) {}
-        checkAndTriggerAutomatedDailyBackup(entries).catch((err) =>
-          console.warn('Auto backup trigger notice:', err)
-        );
+      hasFirestoreTtLoaded.current = true;
+      if (Array.isArray(entries)) {
+        if (entries.length > 0) {
+          setTimetable(entries);
+          try {
+            localStorage.setItem('classpilot_timetable', JSON.stringify(entries));
+          } catch (e) {}
+          checkAndTriggerAutomatedDailyBackup(entries).catch((err) =>
+            console.warn('Auto backup trigger notice:', err)
+          );
+          // Keep backend Express SQLite in sync with Firestore
+          fetch('/api/timetable/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ entries, replaceExisting: true }),
+          }).catch((e) => {});
+        } else {
+          // If Firestore is empty, check if we have an uploaded routine in localStorage
+          try {
+            const saved = localStorage.getItem('classpilot_timetable');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                console.log('[FirestoreSync] Uploading saved local routine to Firestore...');
+                saveTimetableToFirestore(parsed, true);
+                setTimetable(parsed);
+              }
+            }
+          } catch (e) {}
+        }
       }
     });
 
@@ -422,7 +474,8 @@ export default function App() {
 
     // Firestore Real-Time Faculty & Room Listeners
     const unsubscribeFaculty = subscribeToFacultyRealtime(INITIAL_FACULTY, (list) => {
-      if (list && list.length > 0) {
+      hasFirestoreFacLoaded.current = true;
+      if (Array.isArray(list) && list.length > 0) {
         setFacultyList(list);
         try {
           localStorage.setItem('classpilot_faculty_list', JSON.stringify(list));
@@ -431,7 +484,8 @@ export default function App() {
     });
 
     const unsubscribeRooms = subscribeToRoomsRealtime(INITIAL_ROOMS, (list) => {
-      if (list && list.length > 0) {
+      hasFirestoreRoomsLoaded.current = true;
+      if (Array.isArray(list) && list.length > 0) {
         setRoomList(list);
         try {
           localStorage.setItem('classpilot_room_list', JSON.stringify(list));
@@ -439,43 +493,49 @@ export default function App() {
       }
     });
 
-    // Helper to fetch latest backend state periodically
+    // Helper fallback for initial fetch before Firestore connects
     const syncBackendData = () => {
-      fetch('/api/timetable')
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setTimetable(data);
-            try {
-              localStorage.setItem('classpilot_timetable', JSON.stringify(data));
-            } catch (e) {}
-          }
-        })
-        .catch((err) => {});
+      if (!hasFirestoreTtLoaded.current) {
+        fetch('/api/timetable')
+          .then((res) => res.json())
+          .then((data) => {
+            if (Array.isArray(data) && data.length > 0 && !hasFirestoreTtLoaded.current) {
+              setTimetable(data);
+              try {
+                localStorage.setItem('classpilot_timetable', JSON.stringify(data));
+              } catch (e) {}
+            }
+          })
+          .catch((err) => {});
+      }
 
-      fetch('/api/faculty')
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setFacultyList(data);
-            try {
-              localStorage.setItem('classpilot_faculty_list', JSON.stringify(data));
-            } catch (e) {}
-          }
-        })
-        .catch((err) => {});
+      if (!hasFirestoreFacLoaded.current) {
+        fetch('/api/faculty')
+          .then((res) => res.json())
+          .then((data) => {
+            if (Array.isArray(data) && data.length > 0 && !hasFirestoreFacLoaded.current) {
+              setFacultyList(data);
+              try {
+                localStorage.setItem('classpilot_faculty_list', JSON.stringify(data));
+              } catch (e) {}
+            }
+          })
+          .catch((err) => {});
+      }
 
-      fetch('/api/rooms')
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setRoomList(data);
-            try {
-              localStorage.setItem('classpilot_room_list', JSON.stringify(data));
-            } catch (e) {}
-          }
-        })
-        .catch((err) => {});
+      if (!hasFirestoreRoomsLoaded.current) {
+        fetch('/api/rooms')
+          .then((res) => res.json())
+          .then((data) => {
+            if (Array.isArray(data) && data.length > 0 && !hasFirestoreRoomsLoaded.current) {
+              setRoomList(data);
+              try {
+                localStorage.setItem('classpilot_room_list', JSON.stringify(data));
+              } catch (e) {}
+            }
+          })
+          .catch((err) => {});
+      }
 
       fetch('/api/students')
         .then((res) => res.json())
@@ -490,11 +550,8 @@ export default function App() {
         .catch((err) => {});
     };
 
-    // Initial fetch on mount
+    // Initial fallback fetch on mount
     syncBackendData();
-
-    // Poll server every 8 seconds so all connected devices update automatically
-    const pollInterval = setInterval(syncBackendData, 8000);
 
     // Listen for PWA Install Prompt
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -508,7 +565,11 @@ export default function App() {
     }
 
     return () => {
-      clearInterval(pollInterval);
+      unsubscribeTimetable();
+      unsubscribeVersions();
+      unsubscribeBackups();
+      unsubscribeFaculty();
+      unsubscribeRooms();
     };
   }, []);
 
