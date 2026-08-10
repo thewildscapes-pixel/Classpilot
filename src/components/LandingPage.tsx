@@ -23,6 +23,7 @@ import {
 interface LandingPageProps {
   currentUser: User | null;
   facultyList?: Faculty[];
+  onUpdateFaculty?: (id: string, updatedData: Partial<Faculty>) => void;
   onLoginSuccess: (user: User, token: string) => void;
   onLogout: () => void;
   onGoToDashboard?: () => void;
@@ -31,6 +32,7 @@ interface LandingPageProps {
 export const LandingPage: React.FC<LandingPageProps> = ({
   currentUser,
   facultyList = [],
+  onUpdateFaculty,
   onLoginSuccess,
   onLogout,
   onGoToDashboard,
@@ -38,6 +40,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   // Form input state matching requested combined OTP flow
   const [email, setEmail] = useState<string>('deborsheegogoi@gmail.com');
   const [phone, setPhone] = useState<string>('9706375001');
+  const [selectedFacultyIdForLogin, setSelectedFacultyIdForLogin] = useState<string>('');
   const [otpStep, setOtpStep] = useState<boolean>(false);
   const [otpDigits, setOtpDigits] = useState<string[]>(['8', '4', '9', '2', '0', '1']);
 
@@ -65,6 +68,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     // Check pre-registered faculty records or superadmin
     const matchedFac = facultyList.find(
       (f) =>
+        (selectedFacultyIdForLogin && f.id === selectedFacultyIdForLogin) ||
         isPhoneMatch(f.phone, cleanPhone) ||
         isPhoneMatch(f.whatsappPhone, cleanPhone) ||
         (f.email && email && f.email.toLowerCase().trim() === email.toLowerCase().trim()) ||
@@ -73,11 +77,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
     const matchedAdmin = cleanPhone === '9706375001' || email.toLowerCase().includes('thewildscapes');
 
-    if (!matchedFac && !matchedAdmin && facultyList.length > 0) {
-      setErrorMessage(
-        'Number not registered in faculty database — please contact your department admin at Digboi College to pre-register your mobile number.'
-      );
-      return;
+    if (!matchedFac && !matchedAdmin && facultyList.length > 0 && !selectedFacultyIdForLogin) {
+      // Auto-select token match if available
+      const tokenMatch = facultyList.find((f) => isFacultyNameMatch(f.name, facultyName));
+      if (tokenMatch) {
+        setSelectedFacultyIdForLogin(tokenMatch.id);
+      }
     }
 
     setIsLoading(true);
@@ -104,20 +109,27 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       const cleanPhone = phone.trim().replace(/\D/g, '');
       const matchedFac = facultyList.find(
         (f) =>
+          (selectedFacultyIdForLogin && f.id === selectedFacultyIdForLogin) ||
           isPhoneMatch(f.phone, cleanPhone) ||
           isPhoneMatch(f.whatsappPhone, cleanPhone) ||
           (f.email && email && f.email.toLowerCase().trim() === email.toLowerCase().trim()) ||
           (facultyName && isFacultyNameMatch(f.name, facultyName))
       );
 
+      if (matchedFac && onUpdateFaculty) {
+        if (!matchedFac.phone || matchedFac.phone !== cleanPhone) {
+          onUpdateFaculty(matchedFac.id, { phone: cleanPhone, whatsappPhone: cleanPhone });
+        }
+      }
+
       const newUser: User = {
         id: matchedFac ? matchedFac.id : `user_${Date.now()}`,
-        name: matchedFac ? matchedFac.name : 'Dr. Deborshee Gogoi',
-        email: matchedFac ? matchedFac.email : email.trim() || 'thewildscapes@gmail.com',
+        name: matchedFac ? matchedFac.name : facultyName.trim() || 'Dr. Faculty Member',
+        email: matchedFac ? matchedFac.email : email.trim() || 'faculty@digboicollege.edu.in',
         phone: cleanPhone,
         whatsappPhone: cleanPhone,
-        role: matchedAdminOrFacRole(cleanPhone, email),
-        facultyId: matchedFac ? matchedFac.id : 'fac_1',
+        role: matchedAdminOrFacRole(cleanPhone, email, matchedFac),
+        facultyId: matchedFac ? matchedFac.id : `fac_${cleanPhone}`,
         department: matchedFac ? matchedFac.department : department,
         employeeId: matchedFac?.employeeId || 'DC-EMP-001',
         isVerified: true,
@@ -129,8 +141,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     }, 400);
   };
 
-  const matchedAdminOrFacRole = (p: string, e: string) => {
-    if (p === '9706375001' || e.includes('thewildscapes')) return 'admin';
+  const matchedAdminOrFacRole = (p: string, e: string, matchedFac?: Faculty) => {
+    if (p === '9706375001' || e.includes('thewildscapes') || (matchedFac as any)?.role === 'admin') return 'admin';
     return 'faculty';
   };
 
@@ -311,6 +323,41 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div className="text-xs font-extrabold text-slate-800">Email & WhatsApp Authentication</div>
                   <div className="text-[11px] text-slate-500">We will send a 6-digit verification OTP to both your email and WhatsApp number.</div>
                 </div>
+
+                {/* Faculty Profile Selection Dropdown (Optional for pre-loaded routines) */}
+                {facultyList && facultyList.length > 0 && (
+                  <div className="space-y-1 text-left">
+                    <label className="text-[11px] font-bold text-slate-700 block flex items-center justify-between">
+                      <span>Faculty Member Name</span>
+                      <span className="text-[10px] text-blue-600 font-semibold">Links to assigned routine</span>
+                    </label>
+                    <div className="relative">
+                      <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <select
+                        value={selectedFacultyIdForLogin}
+                        onChange={(e) => {
+                          const facId = e.target.value;
+                          setSelectedFacultyIdForLogin(facId);
+                          const fac = facultyList.find((f) => f.id === facId);
+                          if (fac) {
+                            if (fac.email) setEmail(fac.email);
+                            if (fac.phone) setPhone(fac.phone);
+                            setFacultyName(fac.name);
+                            if (fac.department) setDepartment(fac.department);
+                          }
+                        }}
+                        className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs cursor-pointer"
+                      >
+                        <option value="">-- Select Your Name (Auto-linked) --</option>
+                        {facultyList.map((fac) => (
+                          <option key={fac.id} value={fac.id}>
+                            {fac.name} ({fac.department})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
 
                 {/* Email Address Input */}
                 <div className="space-y-1 text-left">

@@ -162,7 +162,7 @@ export function listenToAuthChanges(callback: (user: User | null) => void) {
           email: fbUser.email || '',
           whatsappPhone: data.whatsappPhone || '',
           role: data.role || 'faculty',
-          facultyId: data.facultyId || 'fac_1',
+          facultyId: data.facultyId || `fac_${fbUser.uid.substring(0, 8)}`,
           department: data.department || 'Commerce',
           isVerified: true,
         });
@@ -173,7 +173,7 @@ export function listenToAuthChanges(callback: (user: User | null) => void) {
           email: fbUser.email || '',
           whatsappPhone: '',
           role: 'faculty',
-          facultyId: 'fac_1',
+          facultyId: `fac_${fbUser.uid.substring(0, 8)}`,
           department: 'Commerce',
           isVerified: true,
         };
@@ -187,7 +187,7 @@ export function listenToAuthChanges(callback: (user: User | null) => void) {
         name: fbUser.displayName || 'Faculty Member',
         email: fbUser.email || '',
         role: 'faculty',
-        facultyId: 'fac_1',
+        facultyId: `fac_${fbUser.uid.substring(0, 8)}`,
         department: 'Commerce',
         isVerified: true,
       });

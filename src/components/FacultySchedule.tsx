@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TimetableEntry, Faculty, DayOfWeek, User, Student } from '../types';
-import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName, isFacultyNameMatch } from '../utils/timeUtils';
+import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName, isFacultyNameMatch, isPhoneMatch } from '../utils/timeUtils';
 import { ClassQrAttendanceModal } from './ClassQrAttendanceModal';
 import {
   Calendar,
@@ -100,7 +100,39 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const [jumpDate, setJumpDate] = useState<string>('');
   const [qrModalEntry, setQrModalEntry] = useState<TimetableEntry | null>(null);
 
-  const currentFaculty = facultyList.find((f) => f.id === selectedFacultyId) || facultyList[0];
+  // Determine current active faculty object
+  const currentFaculty: Faculty =
+    facultyList.find((f) => f.id === selectedFacultyId) ||
+    facultyList.find(
+      (f) =>
+        currentUser &&
+        (f.id === currentUser.facultyId ||
+          isPhoneMatch(f.phone, currentUser.phone) ||
+          isPhoneMatch(f.whatsappPhone, currentUser.phone) ||
+          isPhoneMatch(f.phone, currentUser.whatsappPhone) ||
+          isFacultyNameMatch(f.name, currentUser.name))
+    ) ||
+    (currentUser
+      ? {
+          id: currentUser.facultyId || currentUser.id || 'fac_user',
+          name: currentUser.name || 'Faculty Member',
+          email: currentUser.email || '',
+          department: currentUser.department || 'Commerce',
+          designation: 'Faculty Member',
+          phone: currentUser.phone || currentUser.whatsappPhone || '',
+          whatsappPhone: currentUser.phone || currentUser.whatsappPhone || '',
+          isVerified: true,
+        }
+      : facultyList[0]);
+
+  // Check if viewing logged-in user's own schedule or another faculty's
+  const isViewingOwnSchedule = Boolean(
+    currentUser &&
+      (selectedFacultyId === currentUser.facultyId ||
+        (currentFaculty &&
+          (currentFaculty.id === currentUser.facultyId ||
+            isFacultyNameMatch(currentFaculty.name, currentUser.name))))
+  );
 
   // Handle Jump-to-Date selection
   const handleJumpDateChange = (dateStr: string) => {
@@ -114,11 +146,34 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     setViewMode('daily');
   };
 
-  // Filter timetable entries for selected faculty (by ID or by Name match)
+  // Filter timetable entries strictly for active target faculty
   const allFacultyEntries = timetable.filter((e) => {
-    if (e.facultyId === selectedFacultyId) return true;
-    if (currentFaculty && e.facultyId === currentFaculty.id) return true;
-    if (currentFaculty && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
+    // 1. Direct match with current active faculty object
+    if (currentFaculty) {
+      if (e.facultyId && e.facultyId === currentFaculty.id) return true;
+      if (e.facultyName && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
+    }
+
+    // 2. If viewing own schedule, also match currentUser properties
+    if (isViewingOwnSchedule && currentUser) {
+      if (currentUser.facultyId && e.facultyId === currentUser.facultyId) return true;
+      if (currentUser.name && isFacultyNameMatch(e.facultyName, currentUser.name)) return true;
+
+      // Match via phone linkage in facultyList
+      const matchedFacInList = facultyList.find(
+        (f) => f.id === e.facultyId || isFacultyNameMatch(f.name, e.facultyName)
+      );
+      if (
+        matchedFacInList &&
+        (isPhoneMatch(matchedFacInList.phone, currentUser.phone) ||
+          isPhoneMatch(matchedFacInList.whatsappPhone, currentUser.phone) ||
+          isPhoneMatch(matchedFacInList.phone, currentUser.whatsappPhone) ||
+          isFacultyNameMatch(matchedFacInList.name, currentUser.name))
+      ) {
+        return true;
+      }
+    }
+
     return false;
   });
 

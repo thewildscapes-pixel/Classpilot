@@ -947,6 +947,8 @@ export default function App() {
     return (
       <LandingPage
         currentUser={currentUser}
+        facultyList={facultyList}
+        onUpdateFaculty={handleUpdateFaculty}
         onLoginSuccess={handleLoginSuccess}
         onLogout={handleLogout}
         onGoToDashboard={() => setActiveTab('schedule')}

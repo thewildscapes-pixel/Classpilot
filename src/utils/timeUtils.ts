@@ -249,17 +249,39 @@ export function normalizeFacultyName(name: string = ''): string {
   return name
     .toLowerCase()
     .replace(/\b(dr|prof|mr|mrs|ms|doc|associate|assistant|professor|sir|madam)\.?:?\b/gi, '')
-    .replace(/[^a-z0-9]/g, '')
+    .replace(/[^a-z0-9\s]/g, '')
     .trim();
 }
 
 export function isFacultyNameMatch(name1: string = '', name2: string = ''): boolean {
   if (!name1 || !name2) return false;
-  const n1 = normalizeFacultyName(name1);
-  const n2 = normalizeFacultyName(name2);
-  if (!n1 || !n2) return false;
-  if (n1 === n2) return true;
-  if (n1.length >= 4 && n2.length >= 4 && (n1.includes(n2) || n2.includes(n1))) return true;
+  const norm1 = normalizeFacultyName(name1);
+  const norm2 = normalizeFacultyName(name2);
+  if (!norm1 || !norm2) return false;
+
+  const s1 = norm1.replace(/\s+/g, '');
+  const s2 = norm2.replace(/\s+/g, '');
+  if (s1 === s2) return true;
+
+  // Substring check for names with at least 4 chars
+  if (s1.length >= 4 && s2.length >= 4 && (s1.includes(s2) || s2.includes(s1))) return true;
+
+  // Token-based matching (e.g. "S. Boruah" vs "Sampreeti Boruah")
+  const tokens1 = norm1.split(/\s+/).filter(Boolean);
+  const tokens2 = norm2.split(/\s+/).filter(Boolean);
+
+  if (tokens1.length > 0 && tokens2.length > 0) {
+    const surname1 = tokens1[tokens1.length - 1];
+    const surname2 = tokens2[tokens2.length - 1];
+    if (surname1 === surname2 && surname1.length >= 3) {
+      const first1 = tokens1[0];
+      const first2 = tokens2[0];
+      if (first1 === first2 || first1.startsWith(first2[0]) || first2.startsWith(first1[0])) {
+        return true;
+      }
+    }
+  }
+
   return false;
 }
 
