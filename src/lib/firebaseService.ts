@@ -245,6 +245,17 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
         });
       });
 
+      if (entries.length === 0) {
+        console.warn('[subscribeToTimetableRealtime] Firestore "timetables" collection returned 0 entries (empty database collection).');
+      } else {
+        const isMockData = entries.every((e) => e.id.startsWith('tt_dg_') || e.id.startsWith('tt_jb_') || e.id.startsWith('tt_rs_'));
+        console.log(
+          `[subscribeToTimetableRealtime] Retrieved ${entries.length} routine entries from Firestore database. Source: ${
+            isMockData ? 'Mock Initial State' : 'Actual Database (Uploaded/Custom Routine)'
+          }`
+        );
+      }
+
       callback(entries);
     },
     (error) => {

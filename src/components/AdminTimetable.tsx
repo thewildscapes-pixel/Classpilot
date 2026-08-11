@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User, RoutineVersion, RoutineBackup } from '../types';
 import { AdminNaacReports } from './AdminNaacReports';
 import { AdminSqliteIntegrityView } from './AdminSqliteIntegrityView';
+import { DiagnosticBadge } from './DiagnosticBadge';
 import {
   DAYS_OF_WEEK,
   DEPARTMENTS_LIST,
@@ -52,6 +53,9 @@ import {
   GripVertical,
   Move,
   ArrowRightLeft,
+  Activity,
+  Terminal,
+  Info,
 } from 'lucide-react';
 
 interface AdminTimetableProps {
@@ -79,6 +83,7 @@ interface AdminTimetableProps {
   onClearAllFaculty?: () => void;
   onAddRoom: (room: Partial<Room>) => void;
   onResetData: () => void;
+  onPurgeMockData?: () => void;
   onToggleUserAdminRole?: (userEmail: string, makeAdmin: boolean) => void;
 }
 
@@ -103,12 +108,55 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   onClearAllFaculty,
   onAddRoom,
   onResetData,
+  onPurgeMockData,
   onToggleUserAdminRole,
 }) => {
   // Navigation sub-tabs inside Admin
   const [activeAdminTab, setActiveAdminTab] = useState<
     'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access' | 'backup_safeguards' | 'sqlite_integrity'
   >('grid');
+
+  // Diagnostic Data Source Overlay State
+  const [showDiagnosticDetails, setShowDiagnosticDetails] = useState<boolean>(false);
+
+  // Compute whether current timetable data state was sourced from initial default mock data or fetched backend DB
+  const timetableDataSource = React.useMemo(() => {
+    if (!timetable || timetable.length === 0) {
+      return {
+        type: 'EMPTY',
+        label: 'Empty Timetable State',
+        badgeClass: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+        description: 'No routine entries found in current active state.',
+        isMock: false,
+      };
+    }
+
+    const isMock = timetable.every(
+      (e) =>
+        e.id &&
+        (e.id.startsWith('tt_dg_') || e.id.startsWith('tt_jb_') || e.id.startsWith('tt_rs_'))
+    );
+
+    if (isMock) {
+      return {
+        type: 'MOCK_INITIAL_SEED',
+        label: 'Initial Default Mock Data',
+        badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+        description:
+          'Active state is currently sourced from initial default seed mock data (INITIAL_TIMETABLE).',
+        isMock: true,
+      };
+    }
+
+    return {
+      type: 'BACKEND_DATABASE',
+      label: 'Fetched Backend Database',
+      badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+      description:
+        'Active state is currently sourced from live backend database storage (Firestore / Server SQLite API).',
+      isMock: false,
+    };
+  }, [timetable]);
 
   // Raw Uploaded File Retention State
   const [uploadedRawFileData, setUploadedRawFileData] = useState<{
@@ -964,12 +1012,35 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           const subjName = getRowVal(row, ['subjectname', 'subject', 'course', 'paper', 'title']) || 'Course Lecture';
           const room = getRowVal(row, ['classnoroom', 'room', 'roomno', 'roomnumber', 'hall', 'venue', 'location', 'classno']) || 'Room No. C1';
           const batch = getRowVal(row, ['class', 'batch', 'section', 'coursebatch', 'semester', 'program']) || 'FYUGP 1st Sem';
-          const dept = getRowVal(row, ['department', 'dept', 'branch']) || facMatch?.department || 'Commerce';
+          const progSem = getRowVal(row, ['programsemester', 'program', 'sem']) || 'FYUGP 1st Semester';
+
+          let dept = getRowVal(row, ['department', 'dept', 'branch']) || facMatch?.department;
+          if (!dept || dept === 'Commerce') {
+            const combinedText = `${subjCode} ${subjName} ${batch} ${progSem}`.toUpperCase();
+            if (combinedText.includes('CS') || combinedText.includes('COMP') || combinedText.includes('COMPUTER')) dept = 'Computer Science';
+            else if (combinedText.includes('PHY') || combinedText.includes('PHYSICS')) dept = 'Physics';
+            else if (combinedText.includes('CHM') || combinedText.includes('CHEM') || combinedText.includes('CHEMISTRY')) dept = 'Chemistry';
+            else if (combinedText.includes('MAT') || combinedText.includes('MATH') || combinedText.includes('MATHEMATICS')) dept = 'Mathematics';
+            else if (combinedText.includes('ENG') || combinedText.includes('ENGLISH')) dept = 'English';
+            else if (combinedText.includes('BOT') || combinedText.includes('BOTANY')) dept = 'Botany';
+            else if (combinedText.includes('ZOO') || combinedText.includes('ZOOLOGY')) dept = 'Zoology';
+            else if (combinedText.includes('ECO') || combinedText.includes('ECONOMICS')) dept = 'Economics';
+            else if (!dept) dept = 'Commerce';
+          }
 
           const cycleVal = getRowVal(row, ['semestercycle', 'cycle', 'term']);
-          const semesterCycle = (cycleVal && (cycleVal.toLowerCase().includes('even') ? 'Even' : 'Odd')) || activeSemesterCycle;
+          let semesterCycle: 'Odd' | 'Even' = activeSemesterCycle;
+          if (cycleVal) {
+            semesterCycle = cycleVal.toLowerCase().includes('even') ? 'Even' : 'Odd';
+          } else {
+            const bLow = `${batch} ${progSem} ${subjCode} ${subjName}`.toLowerCase();
+            if (bLow.includes('even') || bLow.includes('2nd') || bLow.includes('4th') || bLow.includes('6th') || bLow.includes('8th')) {
+              semesterCycle = 'Even';
+            } else if (bLow.includes('odd') || bLow.includes('1st') || bLow.includes('3rd') || bLow.includes('5th') || bLow.includes('7th')) {
+              semesterCycle = 'Odd';
+            }
+          }
 
-          const progSem = getRowVal(row, ['programsemester', 'program', 'sem']) || 'FYUGP 1st Semester';
           const category = getRowVal(row, ['papercategory', 'category', 'type', 'papertype']) || 'Major';
           const notes = getRowVal(row, ['notes', 'remarks']);
 
@@ -1054,6 +1125,15 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       return; // Do NOT reset form state on write failure
     }
     
+    // Auto-detect predominant cycle from imported entries
+    const evenCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Even').length;
+    const oddCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Odd').length;
+    if (evenCount > oddCount) {
+      setActiveSemesterCycle('Even');
+    } else if (oddCount > evenCount) {
+      setActiveSemesterCycle('Odd');
+    }
+
     // Auto-reset filters so all imported routine entries are immediately visible
     setSelectedDepartment('All');
     setSelectedProgramSemester('All');
@@ -1221,15 +1301,160 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Data Source Diagnostic Overlay Component */}
+      <div className="bg-slate-800/90 rounded-2xl p-4 border border-slate-700/80 shadow-lg space-y-3 relative overflow-hidden">
+        <div
+          className={`absolute top-0 left-0 right-0 h-1 ${
+            timetableDataSource.type === 'BACKEND_DATABASE'
+              ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500'
+              : timetableDataSource.type === 'MOCK_INITIAL_SEED'
+              ? 'bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600'
+              : 'bg-gradient-to-r from-rose-500 to-red-600'
+          }`}
+        />
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-1">
+          <div className="flex items-start md:items-center space-x-3">
+            <div
+              className={`p-2.5 rounded-xl border ${
+                timetableDataSource.type === 'BACKEND_DATABASE'
+                  ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60'
+                  : timetableDataSource.type === 'MOCK_INITIAL_SEED'
+                  ? 'bg-amber-950/60 text-amber-400 border-amber-800/60'
+                  : 'bg-rose-950/60 text-rose-400 border-rose-800/60'
+              }`}
+            >
+              <Database className="w-5 h-5" />
+            </div>
+
+            <div>
+              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Data Provenance Diagnostic:
+                </span>
+                <span
+                  className={`px-2.5 py-0.5 text-xs font-bold rounded-full border flex items-center space-x-1.5 ${timetableDataSource.badgeClass}`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full animate-pulse ${
+                      timetableDataSource.type === 'BACKEND_DATABASE'
+                        ? 'bg-emerald-400'
+                        : timetableDataSource.type === 'MOCK_INITIAL_SEED'
+                        ? 'bg-amber-400'
+                        : 'bg-rose-400'
+                    }`}
+                  />
+                  <span>{timetableDataSource.label}</span>
+                </span>
+                <span className="text-xs text-slate-300 font-medium">
+                  ({timetable.length} routine {timetable.length === 1 ? 'entry' : 'entries'})
+                </span>
+              </div>
+
+              <p className="text-xs text-slate-300 mt-1 font-mono">
+                {timetableDataSource.description}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 shrink-0">
+            <DiagnosticBadge timetable={timetable} onPurgeMockData={onPurgeMockData} />
+            <button
+              onClick={() => setShowDiagnosticDetails((prev) => !prev)}
+              className="px-3.5 py-1.5 bg-slate-900/90 hover:bg-slate-700/90 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700 transition-all flex items-center space-x-1.5 shadow-sm"
+            >
+              <Activity className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{showDiagnosticDetails ? 'Hide Diagnostics' : 'Inspect Diagnostic Overlay'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Expanded Diagnostic Overlay Logs & Details Panel */}
+        {showDiagnosticDetails && (
+          <div className="mt-3 pt-3 border-t border-slate-700/80 bg-slate-900/90 rounded-xl p-4 space-y-4 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/60">
+                <span className="text-slate-400 block text-[11px] font-semibold uppercase">Total Routine Entries</span>
+                <span className="text-lg font-bold text-white mt-0.5 block">{timetable.length} Classes</span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/60">
+                <span className="text-slate-400 block text-[11px] font-semibold uppercase">Detected Record Signature</span>
+                <span className="text-xs font-mono font-bold text-amber-300 mt-0.5 block truncate">
+                  {timetable.length > 0 ? timetable[0].id : 'N/A'}
+                </span>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                  {timetableDataSource.type === 'MOCK_INITIAL_SEED' ? 'Pattern: tt_dg_* / tt_jb_* / tt_rs_*' : 'Pattern: Custom / Firestore UID'}
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700/60">
+                <span className="text-slate-400 block text-[11px] font-semibold uppercase">Backend Synchronization</span>
+                <span className="text-xs font-semibold text-emerald-400 mt-0.5 block">
+                  Firestore Realtime & Express SQLite API (`/api/timetable`)
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-semibold text-slate-200 mb-1.5 flex items-center space-x-1.5">
+                <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Active Timetable Item Signature Inspection (First 3 Items):</span>
+              </h4>
+
+              {timetable.length === 0 ? (
+                <p className="text-slate-400 italic">No records present in active state.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {timetable.slice(0, 3).map((item, idx) => {
+                    const isMockItem =
+                      item.id &&
+                      (item.id.startsWith('tt_dg_') ||
+                        item.id.startsWith('tt_jb_') ||
+                        item.id.startsWith('tt_rs_'));
+                    return (
+                      <div
+                        key={item.id || idx}
+                        className="bg-slate-950/80 p-2.5 rounded-md border border-slate-800 flex items-center justify-between text-[11px] font-mono"
+                      >
+                        <div className="flex items-center space-x-2 truncate">
+                          <span className="text-slate-500 font-bold">#{idx + 1}</span>
+                          <span className="text-cyan-300 font-bold">{item.id}</span>
+                          <span className="text-slate-300 truncate">
+                            ({item.subjectCode} - {item.subjectName})
+                          </span>
+                        </div>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${
+                            isMockItem
+                              ? 'bg-amber-950/90 text-amber-300 border border-amber-800'
+                              : 'bg-emerald-950/90 text-emerald-300 border border-emerald-800'
+                          }`}
+                        >
+                          {isMockItem ? 'Mock Initial Seed' : 'Fetched Backend Database'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Top Admin Dashboard Control Header */}
       <div className="bg-slate-800/95 rounded-2xl p-5 border border-slate-700/80 shadow-xl space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center space-x-2">
-              <Shield className="w-5 h-5 text-indigo-400" />
-              <h2 className="font-heading font-bold text-xl text-white">
-                Academic Routine & Timetable Master Hub
-              </h2>
+            <div className="flex items-center space-x-3 flex-wrap gap-y-1">
+              <div className="flex items-center space-x-2">
+                <Shield className="w-5 h-5 text-indigo-400" />
+                <h2 className="font-heading font-bold text-xl text-white">
+                  Academic Routine & Timetable Master Hub
+                </h2>
+              </div>
+              <DiagnosticBadge timetable={timetable} onPurgeMockData={onPurgeMockData} />
             </div>
             <p className="text-xs text-slate-400 mt-1">
               Construct, edit, and monitor hourly routines (8:00 AM - 4:00 PM) for Odd & Even Semesters across Digboi College.

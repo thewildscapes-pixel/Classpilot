@@ -499,14 +499,31 @@ export default function App() {
         fetch('/api/timetable')
           .then((res) => res.json())
           .then((data) => {
-            if (Array.isArray(data) && data.length > 0 && !hasFirestoreTtLoaded.current) {
-              setTimetable(data);
-              try {
-                localStorage.setItem('classpilot_timetable', JSON.stringify(data));
-              } catch (e) {}
+            if (Array.isArray(data)) {
+              if (data.length === 0) {
+                console.warn('[syncBackendData] Server API /api/timetable returned an EMPTY array ([]). No routine entries in backend DB.');
+              } else {
+                const isMockData = data.every(
+                  (e: any) => e.id && (e.id.startsWith('tt_dg_') || e.id.startsWith('tt_jb_') || e.id.startsWith('tt_rs_'))
+                );
+                console.log(
+                  `[syncBackendData] Server API /api/timetable returned ${data.length} routine entries from database. Source: ${
+                    isMockData ? 'Mock Initial State' : 'Actual Database (Uploaded/Custom Routine)'
+                  }`
+                );
+              }
+
+              if (data.length > 0 && !hasFirestoreTtLoaded.current) {
+                setTimetable(data);
+                try {
+                  localStorage.setItem('classpilot_timetable', JSON.stringify(data));
+                } catch (e) {}
+              }
             }
           })
-          .catch((err) => {});
+          .catch((err) => {
+            console.error('[syncBackendData] Error fetching /api/timetable:', err);
+          });
       }
 
       if (!hasFirestoreFacLoaded.current) {
@@ -989,7 +1006,7 @@ export default function App() {
     } catch (e) {}
 
     // 5. Write directly to persistent Firestore Database
-    const fsResult = await saveTimetableToFirestore(formattedEntries, replaceExisting);
+    const fsResult = await saveTimetableToFirestore(newFullRoutine, replaceExisting);
 
     // Record Version History Log in Firestore
     recordRoutineVersionInFirestore({
@@ -1205,6 +1222,25 @@ export default function App() {
     handleResetToRealTime();
   };
 
+  const handlePurgeMockDataAndKeepCustom = async () => {
+    const customOnly = timetable.filter(
+      (e) => e.id && !(e.id.startsWith('tt_dg_') || e.id.startsWith('tt_jb_') || e.id.startsWith('tt_rs_'))
+    );
+
+    setTimetable(customOnly);
+    try {
+      localStorage.setItem('classpilot_timetable', JSON.stringify(customOnly));
+    } catch (e) {}
+
+    await saveTimetableToFirestore(customOnly, true);
+
+    fetch('/api/timetable/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: customOnly, replaceExisting: true }),
+    }).catch(() => {});
+  };
+
   const handleToggleUserAdminRole = (userEmail: string, makeAdmin: boolean) => {
     setFacultyList((prev) =>
       prev.map((f) => {
@@ -1368,6 +1404,7 @@ export default function App() {
             onClearAllFaculty={handleClearAllFaculty}
             onAddRoom={handleAddRoom}
             onResetData={handleResetData}
+            onPurgeMockData={handlePurgeMockDataAndKeepCustom}
             onToggleUserAdminRole={handleToggleUserAdminRole}
           />
         )}
