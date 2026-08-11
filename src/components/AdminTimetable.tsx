@@ -3162,16 +3162,21 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
                 <input
                   type="file"
+                  disabled={isSubmittingImport}
                   accept=".xlsx, .xls, .csv"
                   onChange={handleFileUpload}
                   className="hidden"
                   id="timetable-excel-input"
                 />
                 <label
-                  htmlFor="timetable-excel-input"
-                  className="inline-block px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-md transition-all"
+                  htmlFor={isSubmittingImport ? undefined : "timetable-excel-input"}
+                  className={`inline-block px-4 py-2 rounded-xl text-white font-bold text-xs shadow-md transition-all ${
+                    isSubmittingImport
+                      ? 'bg-indigo-900 cursor-not-allowed opacity-50'
+                      : 'bg-indigo-600 hover:bg-indigo-500 cursor-pointer'
+                  }`}
                 >
-                  Browse File
+                  {isSubmittingImport ? 'Processing...' : 'Browse File'}
                 </label>
               </div>
 

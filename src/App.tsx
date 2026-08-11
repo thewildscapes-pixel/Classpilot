@@ -954,79 +954,109 @@ export default function App() {
       });
     }
 
-    // 2. Calculate new full routine dataset
-    const newFullRoutine = replaceExisting ? formattedEntries : [...timetable, ...formattedEntries];
+    // 2. Ensure clean formatting and explicit IDs for all entries
+    const completeEntries: TimetableEntry[] = formattedEntries.map((e, idx) => ({
+      id: e.id || `tt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+      facultyId: e.facultyId || 'fac_1',
+      facultyName: e.facultyName || 'Faculty Member',
+      subjectCode: e.subjectCode || 'CS101',
+      subjectName: e.subjectName || 'General Subject',
+      room: e.room || 'Room No. C1',
+      day: e.day || 'Monday',
+      startTime: e.startTime || '09:00',
+      endTime: e.endTime || '10:15',
+      batch: e.batch || 'FYUGP 1st Sem CS',
+      department: e.department || 'Computer Science',
+      semesterCycle: e.semesterCycle || 'Odd',
+      programSemester: e.programSemester || 'Odd',
+      paperCategory: e.paperCategory || 'Major',
+      notes: e.notes || '',
+      isSubstitute: e.isSubstitute || false,
+    }));
 
-    // 3. Persist locally in state and localStorage immediately
+    const newFullRoutine = replaceExisting ? completeEntries : [...timetable, ...completeEntries];
+
+    // 3. Write to Central Express Server Database and await resolution
+    try {
+      const apiRes = await fetch('/api/timetable/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: completeEntries, replaceExisting }),
+      });
+      if (!apiRes.ok) {
+        const errData = await apiRes.json().catch(() => ({}));
+        return {
+          success: false,
+          error: errData.error || `Server HTTP error ${apiRes.status} writing to database`,
+        };
+      }
+    } catch (e: any) {
+      console.error('Backend API import sync error:', e);
+      return {
+        success: false,
+        error: `Failed to save to central database: ${e.message || e}`,
+      };
+    }
+
+    // 4. Write to Cloud Firestore Database with await and error handling
+    const fsResult = await saveTimetableToFirestore(newFullRoutine, replaceExisting);
+    if (!fsResult.success) {
+      console.error('Firestore timetable batch write error:', fsResult.error);
+      return {
+        success: false,
+        error: `Firestore database write failed: ${fsResult.error || 'Unknown database error'}`,
+      };
+    }
+
+    // 5. Store routine version log & backup snapshot in Firestore
+    if (replaceExisting && timetable.length > 0) {
+      await createRoutineBackupInFirestore({
+        id: `bkp_pre_import_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: 'pre_import_backup',
+        description: `Automatic Safety Snapshot before importing ${rawFileData?.fileName || 'routine spreadsheet'}`,
+        totalClasses: timetable.length,
+        entriesSnapshot: timetable,
+      }).catch((err) => console.warn('Pre-import backup notice:', err));
+    }
+
+    let rawFileId: string | undefined;
+    if (rawFileData) {
+      const fileRes = await saveRawRoutineFileToFirestore({
+        id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        fileName: rawFileData.fileName,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: currentUser?.name || currentUser?.email || 'Academic Admin',
+        fileSizeBytes: rawFileData.fileSizeBytes || 0,
+        contentBase64: rawFileData.contentBase64,
+      }).catch(() => ({ success: false, fileId: undefined }));
+      if (fileRes && fileRes.success) {
+        rawFileId = fileRes.fileId;
+      }
+    }
+
+    await recordRoutineVersionInFirestore({
+      id: `ver_${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      uploadedBy: currentUser?.name || currentUser?.email || 'Academic Admin',
+      fileName: rawFileData?.fileName || 'Routine Upload',
+      totalRecords: completeEntries.length,
+      mode: replaceExisting ? 'replace' : 'append',
+      changeSummary: replaceExisting
+        ? `Replaced timetable with ${completeEntries.length} new class schedules`
+        : `Appended ${completeEntries.length} new class schedules`,
+      rawFileId,
+      rawFileName: rawFileData?.fileName,
+      entriesSnapshot: newFullRoutine,
+    }).catch((e) => console.warn('Version history log notice:', e));
+
+    // 6. UI state setTimetable is ONLY triggered after successful database promise resolution!
     setTimetable(newFullRoutine);
     try {
       localStorage.setItem('classpilot_timetable', JSON.stringify(newFullRoutine));
     } catch (e) {}
 
-    // 4. ALWAYS Sync Central Express Server Backend FIRST (Primary Source of Truth for all devices)
-    try {
-      await fetch('/api/timetable/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries: formattedEntries, replaceExisting }),
-      });
-    } catch (e) {
-      console.warn('Backend API import sync notice:', e);
-    }
-
-    // 5. Asynchronous / Non-Blocking Firestore Sync & Retention Backups
-    (async () => {
-      try {
-        if (replaceExisting && timetable.length > 0) {
-          createRoutineBackupInFirestore({
-            id: `bkp_pre_import_${Date.now()}`,
-            timestamp: new Date().toISOString(),
-            type: 'pre_import_backup',
-            description: `Automatic Safety Snapshot before importing ${rawFileData?.fileName || 'routine spreadsheet'}`,
-            totalClasses: timetable.length,
-            entriesSnapshot: timetable,
-          }).catch((err) => console.warn('Pre-import backup notice:', err));
-        }
-
-        let rawFileId: string | undefined;
-        if (rawFileData) {
-          const fileRes = await saveRawRoutineFileToFirestore({
-            id: `file_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-            fileName: rawFileData.fileName,
-            uploadedAt: new Date().toISOString(),
-            uploadedBy: currentUser?.name || currentUser?.email || 'Academic Admin',
-            fileSizeBytes: rawFileData.fileSizeBytes || 0,
-            contentBase64: rawFileData.contentBase64,
-          }).catch(() => ({ success: false, fileId: undefined }));
-          if (fileRes && fileRes.success) {
-            rawFileId = fileRes.fileId;
-          }
-        }
-
-        await saveTimetableToFirestore(newFullRoutine, replaceExisting).catch((e) =>
-          console.warn('Firestore timetable batch sync notice:', e)
-        );
-
-        recordRoutineVersionInFirestore({
-          id: `ver_${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          uploadedBy: currentUser?.name || currentUser?.email || 'Academic Admin',
-          fileName: rawFileData?.fileName || 'Routine Upload',
-          totalRecords: formattedEntries.length,
-          mode: replaceExisting ? 'replace' : 'append',
-          changeSummary: replaceExisting
-            ? `Replaced timetable with ${formattedEntries.length} new class schedules`
-            : `Appended ${formattedEntries.length} new class schedules`,
-          rawFileId,
-          rawFileName: rawFileData?.fileName,
-          entriesSnapshot: newFullRoutine,
-        }).catch((e) => console.warn('Version history log notice:', e));
-      } catch (err) {
-        console.warn('Background Firestore sync background exception:', err);
-      }
-    })();
-
-    return { success: true, count: formattedEntries.length };
+    return { success: true, count: completeEntries.length };
   };
 
   const handleRollbackRoutine = async (entriesSnapshot: TimetableEntry[], versionLabel: string) => {
