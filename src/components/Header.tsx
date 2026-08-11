@@ -1,7 +1,7 @@
 import React from 'react';
 import { User, DayOfWeek } from '../types';
 import { ClassPilotLogo } from './ClassPilotLogo';
-import { Clock, Bell, BellOff, Shield, Laptop, Calendar, MapPin, Zap, LogOut, Award, Sparkles } from 'lucide-react';
+import { Clock, Bell, BellOff, Shield, Laptop, Calendar, MapPin, Zap, LogOut, Award, Sparkles, RefreshCw, Database } from 'lucide-react';
 
 interface HeaderProps {
   currentUser: User;
@@ -15,6 +15,9 @@ interface HeaderProps {
   isSimulated: boolean;
   onOpenInstallModal: () => void;
   unreadCount: number;
+  syncStatus?: 'synced' | 'syncing' | 'offline';
+  timetableCount?: number;
+  onManualSync?: () => void;
 }
 
 
@@ -30,6 +33,9 @@ export const Header: React.FC<HeaderProps> = ({
   isSimulated,
   onOpenInstallModal,
   unreadCount,
+  syncStatus = 'synced',
+  timetableCount = 0,
+  onManualSync,
 }) => {
   const isSuperAdmin = currentUser && (
     currentUser.email?.toLowerCase().trim() === 'thewildscapes@gmail.com' ||
@@ -130,6 +136,24 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Action Icons */}
           <div className="flex items-center space-x-2 sm:space-x-3">
+            {/* Live Central Database Sync Status Pill */}
+            <button
+              onClick={onManualSync}
+              title="Click to sync live database with central cloud server"
+              className={`p-1.5 px-2.5 rounded-xl border text-xs font-medium transition-all flex items-center space-x-1.5 shadow-sm ${
+                syncStatus === 'synced'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                  : syncStatus === 'syncing'
+                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 animate-pulse'
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20'
+              }`}
+            >
+              <Database className={`w-3.5 h-3.5 ${syncStatus === 'synced' ? 'text-emerald-400' : syncStatus === 'syncing' ? 'text-amber-400 animate-spin' : 'text-rose-400'}`} />
+              <span className="hidden sm:inline text-[11px] font-semibold">
+                {syncStatus === 'synced' ? `Synced • ${timetableCount}` : syncStatus === 'syncing' ? 'Syncing DB...' : 'Offline Mode'}
+              </span>
+              <RefreshCw className="w-3 h-3 opacity-60 hover:opacity-100 hidden sm:inline" />
+            </button>
             {/* Notification Permission Toggle */}
             <button
               onClick={onToggleNotifications}

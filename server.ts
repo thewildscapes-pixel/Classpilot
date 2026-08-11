@@ -22,10 +22,34 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Persistent SQLite Database setup
+// Persistent SQLite & JSON Central Database setup
 let db: Database;
 const dataDir = path.join(process.cwd(), 'data');
 const dbPath = path.join(dataDir, 'classpilot.sqlite');
+
+function saveJsonToDisk(filename: string, data: any) {
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(dataDir, filename), JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error(`Failed to save ${filename} to disk:`, err);
+  }
+}
+
+function loadJsonFromDisk<T>(filename: string): T | null {
+  try {
+    const filePath = path.join(dataDir, filename);
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      return JSON.parse(content) as T;
+    }
+  } catch (err) {
+    console.error(`Failed to load ${filename} from disk:`, err);
+  }
+  return null;
+}
 
 function saveDbToDisk() {
   if (!db) return;
@@ -214,6 +238,44 @@ async function initDatabase() {
     runSql("DELETE FROM rooms WHERE id IN ('rm_1', 'rm_2', 'rm_3', 'rm_4', 'rm_5') AND name LIKE 'Room No.%'");
   } catch (e) {
     console.warn('Notice cleaning legacy mock SQLite rows:', e);
+  }
+
+  // Auto-restore from JSON disk backups if SQLite table is empty
+  try {
+    const countRes = queryAll<{ cnt: number }>('SELECT COUNT(*) as cnt FROM timetable');
+    if (!countRes || !countRes[0] || countRes[0].cnt === 0) {
+      const backupEntries = loadJsonFromDisk<TimetableEntry[]>('timetable.json');
+      if (Array.isArray(backupEntries) && backupEntries.length > 0) {
+        console.log(`✨ Auto-restoring ${backupEntries.length} timetable entries from timetable.json disk backup...`);
+        backupEntries.forEach((entry) => {
+          runSql(
+            `INSERT OR REPLACE INTO timetable 
+            (id, facultyId, facultyName, subjectCode, subjectName, room, day, startTime, endTime, batch, department, semesterCycle, programSemester, paperCategory, notes, isSubstitute) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              entry.id,
+              entry.facultyId,
+              entry.facultyName,
+              entry.subjectCode,
+              entry.subjectName,
+              entry.room,
+              entry.day,
+              entry.startTime,
+              entry.endTime,
+              entry.batch,
+              entry.department,
+              entry.semesterCycle || '',
+              entry.programSemester || '',
+              entry.paperCategory || '',
+              entry.notes || '',
+              entry.isSubstitute ? 1 : 0,
+            ]
+          );
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Notice auto-restoring timetable from JSON backup:', err);
   }
 
   saveDbToDisk();
@@ -919,6 +981,7 @@ async function startServer() {
     });
 
     const allRows = queryAll('SELECT * FROM timetable ORDER BY day ASC, startTime ASC');
+    saveJsonToDisk('timetable.json', allRows);
     res.json({ success: true, count: created.length, timetable: allRows });
   });
 

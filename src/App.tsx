@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   TimetableEntry,
   Faculty,
@@ -342,16 +342,16 @@ export default function App() {
     setIsLoginModalOpen(false);
   };
 
-  // Explicit Logout handler
+  // Explicit Logout handler (Does NOT wipe central routine database!)
   const handleLogout = () => {
     setCurrentUser(null);
     setSelectedFacultyId('');
-    setTimetable([]);
     firebaseSignOut().catch((e) => console.warn('Firebase signout:', e));
     try {
-      localStorage.clear();
+      localStorage.removeItem('classpilot_user_session');
+      localStorage.removeItem('lecturapulse_user_session');
     } catch (e) {
-      console.warn('LocalStorage clear failed:', e);
+      console.warn('LocalStorage remove item failed:', e);
     }
   };
 
@@ -407,6 +407,9 @@ export default function App() {
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedDay, setSelectedDay] = useState<DayOfWeek>(getCurrentDayName(new Date()));
 
+  // Central Database Sync Status Indicator ('synced' | 'syncing' | 'offline')
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline'>('syncing');
+
   // Notifications & Alerts
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<AlertNotification[]>([]);
@@ -422,37 +425,87 @@ export default function App() {
   const [routineVersions, setRoutineVersions] = useState<RoutineVersion[]>([]);
   const [routineBackups, setRoutineBackups] = useState<RoutineBackup[]>([]);
 
-  // Track whether Firestore real-time subscriptions have supplied data
-  const hasFirestoreTtLoaded = useRef(false);
-  const hasFirestoreFacLoaded = useRef(false);
-  const hasFirestoreRoomsLoaded = useRef(false);
-
-  // --- FETCH BACKEND DATA ON MOUNT & REALTIME FIRESTORE TIMETABLE ---
-  useEffect(() => {
-    // Firestore Real-Time Timetable Listener (no manual refresh needed)
-    const unsubscribeTimetable = subscribeToTimetableRealtime((entries) => {
-      hasFirestoreTtLoaded.current = true;
-      if (Array.isArray(entries)) {
-        if (entries.length > 0) {
-          setTimetable(entries);
-          try {
-            localStorage.setItem('classpilot_timetable', JSON.stringify(entries));
-          } catch (e) {}
-          checkAndTriggerAutomatedDailyBackup(entries).catch((err) =>
-            console.warn('Auto backup trigger notice:', err)
-          );
-          // Keep backend Express SQLite in sync with Firestore
-          fetch('/api/timetable/import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entries, replaceExisting: true }),
-          }).catch((e) => {});
-        } else {
-          setTimetable([]);
-          try {
-            localStorage.removeItem('classpilot_timetable');
-          } catch (e) {}
+  // Central Database Sync Engine (Fetches directly from central server API)
+  const syncCentralDatabase = useCallback(async () => {
+    try {
+      const res = await fetch('/api/timetable');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          if (data.length > 0) {
+            setTimetable(data);
+            try {
+              localStorage.setItem('classpilot_timetable', JSON.stringify(data));
+            } catch (e) {}
+          }
+          setSyncStatus('synced');
         }
+      } else {
+        setSyncStatus('offline');
+      }
+
+      fetch('/api/faculty')
+        .then((r) => r.json())
+        .then((facData) => {
+          if (Array.isArray(facData) && facData.length > 0) {
+            setFacultyList(facData);
+          }
+        })
+        .catch(() => {});
+
+      fetch('/api/rooms')
+        .then((r) => r.json())
+        .then((rmData) => {
+          if (Array.isArray(rmData) && rmData.length > 0) {
+            setRoomList(rmData);
+          }
+        })
+        .catch(() => {});
+
+      fetch('/api/students')
+        .then((r) => r.json())
+        .then((stData) => {
+          if (Array.isArray(stData) && stData.length > 0) {
+            setStudents(stData);
+          }
+        })
+        .catch(() => {});
+    } catch (err) {
+      console.warn('Central Database Sync Error:', err);
+      setSyncStatus('offline');
+    }
+  }, []);
+
+  // --- FETCH CENTRAL BACKEND DATA ON MOUNT & REALTIME FIRESTORE TIMETABLE ---
+  useEffect(() => {
+    // Initial fetch from central cloud database
+    syncCentralDatabase();
+
+    // Background multi-device sync poll (every 4 seconds)
+    const pollTimer = setInterval(() => {
+      syncCentralDatabase();
+    }, 4000);
+
+    // Firestore Real-Time Timetable Listener
+    const unsubscribeTimetable = subscribeToTimetableRealtime((entries) => {
+      if (Array.isArray(entries) && entries.length > 0) {
+        setTimetable(entries);
+        setSyncStatus('synced');
+        try {
+          localStorage.setItem('classpilot_timetable', JSON.stringify(entries));
+        } catch (e) {}
+        checkAndTriggerAutomatedDailyBackup(entries).catch((err) =>
+          console.warn('Auto backup trigger notice:', err)
+        );
+        // Sync to Express SQLite server
+        fetch('/api/timetable/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries, replaceExisting: true }),
+        }).catch((e) => {});
+      } else {
+        // If Firestore emits empty or fails, fall back cleanly to central server API
+        syncCentralDatabase();
       }
     });
 
@@ -467,7 +520,6 @@ export default function App() {
 
     // Firestore Real-Time Faculty & Room Listeners
     const unsubscribeFaculty = subscribeToFacultyRealtime(INITIAL_FACULTY, (list) => {
-      hasFirestoreFacLoaded.current = true;
       if (Array.isArray(list) && list.length > 0) {
         setFacultyList(list);
         try {
@@ -477,7 +529,6 @@ export default function App() {
     });
 
     const unsubscribeRooms = subscribeToRoomsRealtime(INITIAL_ROOMS, (list) => {
-      hasFirestoreRoomsLoaded.current = true;
       if (Array.isArray(list) && list.length > 0) {
         setRoomList(list);
         try {
@@ -485,83 +536,6 @@ export default function App() {
         } catch (e) {}
       }
     });
-
-    // Helper fallback for initial fetch before Firestore connects
-    const syncBackendData = () => {
-      if (!hasFirestoreTtLoaded.current) {
-        fetch('/api/timetable')
-          .then((res) => res.json())
-          .then((data) => {
-            if (Array.isArray(data)) {
-              if (data.length === 0) {
-                console.warn('[syncBackendData] Server API /api/timetable returned an EMPTY array ([]). No routine entries in backend DB.');
-              } else {
-                const isMockData = data.every(
-                  (e: any) => e.id && (e.id.startsWith('tt_dg_') || e.id.startsWith('tt_jb_') || e.id.startsWith('tt_rs_'))
-                );
-                console.log(
-                  `[syncBackendData] Server API /api/timetable returned ${data.length} routine entries from database. Source: ${
-                    isMockData ? 'Mock Initial State' : 'Actual Database (Uploaded/Custom Routine)'
-                  }`
-                );
-              }
-
-              if (data.length > 0 && !hasFirestoreTtLoaded.current) {
-                setTimetable(data);
-                try {
-                  localStorage.setItem('classpilot_timetable', JSON.stringify(data));
-                } catch (e) {}
-              }
-            }
-          })
-          .catch((err) => {
-            console.error('[syncBackendData] Error fetching /api/timetable:', err);
-          });
-      }
-
-      if (!hasFirestoreFacLoaded.current) {
-        fetch('/api/faculty')
-          .then((res) => res.json())
-          .then((data) => {
-            if (Array.isArray(data) && data.length > 0 && !hasFirestoreFacLoaded.current) {
-              setFacultyList(data);
-              try {
-                localStorage.setItem('classpilot_faculty_list', JSON.stringify(data));
-              } catch (e) {}
-            }
-          })
-          .catch((err) => {});
-      }
-
-      if (!hasFirestoreRoomsLoaded.current) {
-        fetch('/api/rooms')
-          .then((res) => res.json())
-          .then((data) => {
-            if (Array.isArray(data) && data.length > 0 && !hasFirestoreRoomsLoaded.current) {
-              setRoomList(data);
-              try {
-                localStorage.setItem('classpilot_room_list', JSON.stringify(data));
-              } catch (e) {}
-            }
-          })
-          .catch((err) => {});
-      }
-
-      fetch('/api/students')
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data) && data.length > 0) {
-            setStudents(data);
-            try {
-              localStorage.setItem('classpilot_students', JSON.stringify(data));
-            } catch (e) {}
-          }
-        })
-        .catch((err) => {});
-    };
-
-    // Initial fallback fetch on mount
-    syncBackendData();
 
     // Listen for PWA Install Prompt
     window.addEventListener('beforeinstallprompt', (e) => {
@@ -575,13 +549,14 @@ export default function App() {
     }
 
     return () => {
+      clearInterval(pollTimer);
       unsubscribeTimetable();
       unsubscribeVersions();
       unsubscribeBackups();
       unsubscribeFaculty();
       unsubscribeRooms();
     };
-  }, []);
+  }, [syncCentralDatabase]);
 
   // --- AUTOMATIC FACULTY PROFILE SYNC FOR LOGGED IN USER ---
   useEffect(() => {
@@ -1300,6 +1275,9 @@ export default function App() {
         isSimulated={isSimulated}
         onOpenInstallModal={() => setIsPwaModalOpen(true)}
         unreadCount={unreadAlertsCount}
+        syncStatus={syncStatus}
+        timetableCount={timetable.length}
+        onManualSync={syncCentralDatabase}
       />
 
       {/* Demo Time Control Bar ("Time Traveler") */}

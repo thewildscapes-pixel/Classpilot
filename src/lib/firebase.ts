@@ -56,40 +56,17 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Safely clean up any leftover corrupted firestore IndexedDB databases if browser site data was cleared
-if (typeof window !== 'undefined' && window.indexedDB) {
-  try {
-    if ('databases' in window.indexedDB && typeof window.indexedDB.databases === 'function') {
-      window.indexedDB.databases().then((dbs) => {
-        dbs.forEach((dbInfo) => {
-          if (dbInfo.name && dbInfo.name.toLowerCase().includes('firestore')) {
-            try {
-              window.indexedDB.deleteDatabase(dbInfo.name);
-            } catch (err) {}
-          }
-        });
-      }).catch(() => {});
-    }
-  } catch (err) {}
-}
-
-// Initialize Firestore with custom database ID and memoryLocalCache to prevent IndexedDB corruption issues
-const databaseId =
-  firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)'
-    ? firebaseConfig.firestoreDatabaseId
-    : undefined;
-
+// Initialize Firestore with default or custom database ID and memoryLocalCache
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
       localCache: memoryLocalCache(),
-    },
-    databaseId
+    }
   );
 } catch (e) {
-  firestoreInstance = getFirestore(app, databaseId);
+  firestoreInstance = getFirestore(app);
 }
 
 export const db = firestoreInstance;
