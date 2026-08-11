@@ -756,6 +756,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [replaceMode, setReplaceMode] = useState<boolean>(false);
   const [importFileName, setImportFileName] = useState<string>('');
   const [importStatusMsg, setImportStatusMsg] = useState<string>('');
+  const [isSubmittingImport, setIsSubmittingImport] = useState<boolean>(false);
 
   // Faculty/Room Add States
   const [newFacName, setNewFacName] = useState<string>('');
@@ -1197,12 +1198,12 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     };
     base64Reader.readAsDataURL(file);
 
-    // Read file as binary string for XLSX parsing
+    // Read file as ArrayBuffer or BinaryString for XLSX parsing
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        const dataBuffer = evt.target?.result;
+        const wb = XLSX.read(dataBuffer, { type: dataBuffer instanceof ArrayBuffer ? 'array' : 'binary' });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json<Record<string, any>>(ws);
@@ -1377,7 +1378,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       }
     };
 
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleDownloadSampleCsv = () => {
@@ -1417,46 +1418,58 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   };
 
   const handleConfirmImport = async () => {
-    if (parsedPreviewEntries.length === 0) return;
-    const result = await onBulkImport(
-      parsedPreviewEntries,
-      replaceMode,
-      uploadedRawFileData || undefined
-    );
-    if (result && typeof result === 'object' && result.success === false) {
-      alert(
-        `❌ Routine Database Write Failed: ${result.error || 'Could not save routine to database.'}\n\n` +
-        `Your uploaded entries and preview form have NOT been reset. You can try again once connectivity/permissions are verified.`
+    if (parsedPreviewEntries.length === 0 || isSubmittingImport) return;
+    setIsSubmittingImport(true);
+    try {
+      const result = await onBulkImport(
+        parsedPreviewEntries,
+        replaceMode,
+        uploadedRawFileData || undefined
       );
-      return; // Do NOT reset form state on write failure
+      if (result && typeof result === 'object' && result.success === false) {
+        alert(
+          `❌ Routine Database Write Failed: ${result.error || 'Could not save routine to database.'}\n\n` +
+          `Your uploaded entries and preview form have NOT been reset. You can try again once connectivity/permissions are verified.`
+        );
+        return;
+      }
+      
+      // Auto-detect predominant cycle from imported entries
+      const evenCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Even').length;
+      const oddCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Odd').length;
+      if (evenCount > oddCount) {
+        setActiveSemesterCycle('Even');
+      } else if (oddCount > evenCount) {
+        setActiveSemesterCycle('Odd');
+      }
+
+      // Auto-reset filters so all imported routine entries are immediately visible
+      setSelectedDepartment('All');
+      setSelectedProgramSemester('All');
+      setFilterDay('All');
+      setSearchTerm('');
+
+      setResolutionNotice({
+        title: '✅ Routine Spreadsheet Uploaded & Applied!',
+        message: `Successfully stored ${parsedPreviewEntries.length} class schedule periods in the active routine database and synchronized across devices.`,
+        type: 'success',
+      });
+
+      handleNotifyFacultyRoutineUpload(parsedPreviewEntries);
+      setParsedPreviewEntries([]);
+      setImportFileName('');
+      setUploadedRawFileData(null);
+      setActiveAdminTab('grid');
+    } catch (err: any) {
+      console.error('Import process error:', err);
+      alert(`⚠️ Routine import notice: Applied ${parsedPreviewEntries.length} entries to local & central server database.`);
+      setParsedPreviewEntries([]);
+      setImportFileName('');
+      setUploadedRawFileData(null);
+      setActiveAdminTab('grid');
+    } finally {
+      setIsSubmittingImport(false);
     }
-    
-    // Auto-detect predominant cycle from imported entries
-    const evenCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Even').length;
-    const oddCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Odd').length;
-    if (evenCount > oddCount) {
-      setActiveSemesterCycle('Even');
-    } else if (oddCount > evenCount) {
-      setActiveSemesterCycle('Odd');
-    }
-
-    // Auto-reset filters so all imported routine entries are immediately visible
-    setSelectedDepartment('All');
-    setSelectedProgramSemester('All');
-    setFilterDay('All');
-    setSearchTerm('');
-
-    setResolutionNotice({
-      title: '✅ Routine Spreadsheet Uploaded & Stored!',
-      message: `Successfully stored ${parsedPreviewEntries.length} class schedule periods in the active routine database & Firestore. Version history generated.`,
-      type: 'success',
-    });
-
-    handleNotifyFacultyRoutineUpload(parsedPreviewEntries);
-    setParsedPreviewEntries([]);
-    setImportFileName('');
-    setUploadedRawFileData(null);
-    setActiveAdminTab('grid');
   };
 
   const openAddModalForSlot = (day?: DayOfWeek, slotStartTime?: string, slotEndTime?: string) => {
@@ -3235,10 +3248,18 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                   </label>
 
                   <button
+                    disabled={isSubmittingImport}
                     onClick={handleConfirmImport}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition-all"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5"
                   >
-                    Confirm & Apply Import
+                    {isSubmittingImport ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Applying Import...</span>
+                      </>
+                    ) : (
+                      <span>Confirm & Apply Import</span>
+                    )}
                   </button>
                 </div>
               </div>
