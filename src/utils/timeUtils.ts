@@ -263,15 +263,18 @@ export function isFacultyNameMatch(name1: string = '', name2: string = ''): bool
   const s2 = norm2.replace(/\s+/g, '');
   if (s1 === s2) return true;
 
-  // 1. Direct Substring Check for non-trivial strings (e.g. "Deborshee Gogoi" in "Dr. Deborshee Gogoi")
-  if (s1.length >= 4 && s2.length >= 4 && (s1.includes(s2) || s2.includes(s1))) return true;
+  // 1. Direct Substring Check for non-trivial strings (must be >= 6 chars to avoid short partial collisions)
+  if (s1.length >= 6 && s2.length >= 6 && (s1.includes(s2) || s2.includes(s1))) return true;
 
   const tokens1 = norm1.split(/\s+/).filter(Boolean);
   const tokens2 = norm2.split(/\s+/).filter(Boolean);
 
   if (tokens1.length === 0 || tokens2.length === 0) return false;
 
-  // 2. Acronym / Initials Matching (e.g. "DG" vs "Deborshee Gogoi", "AD" vs "Anupam Dutta", "RS" vs "Rashmi Sarmah")
+  // Exact token set check
+  if (tokens1.length === tokens2.length && tokens1.every((t, i) => t === tokens2[i])) return true;
+
+  // 2. Acronym / Initials Matching (e.g. "DG" vs "Deborshee Gogoi")
   const acronym1 = tokens1.map((t) => t[0]).join('');
   const acronym2 = tokens2.map((t) => t[0]).join('');
 
@@ -279,21 +282,17 @@ export function isFacultyNameMatch(name1: string = '', name2: string = ''): bool
   if (s2.length >= 2 && s2.length <= 4 && s2 === acronym1) return true;
 
   // 3. Surname Match + First Name Initial
-  // e.g. "D. Gogoi" vs "Deborshee Gogoi", "S. Boruah" vs "Sampreeti Boruah", "P.K. Borthakur" vs "Pradip Kumar Borthakur"
+  // e.g. "D. Gogoi" vs "Deborshee Gogoi", "S. Boruah" vs "Sampreeti Boruah"
   const surname1 = tokens1[tokens1.length - 1];
   const surname2 = tokens2[tokens2.length - 1];
 
   if (surname1 === surname2 && surname1.length >= 3) {
     const first1 = tokens1[0];
     const first2 = tokens2[0];
-    if (
-      first1 === first2 ||
-      first1.startsWith(first2[0]) ||
-      first2.startsWith(first1[0]) ||
-      (tokens1.length > 1 && tokens2.length > 1 && tokens1[1] === tokens2[1])
-    ) {
-      return true;
-    }
+    // Only match if first names are strictly identical, OR if one is a single-letter initial matching the other's start
+    if (first1 === first2) return true;
+    if (first1.length === 1 && first2.startsWith(first1)) return true;
+    if (first2.length === 1 && first1.startsWith(first2)) return true;
   }
 
   // 4. First Name Match + Surname Initial (e.g. "Deborshee G" vs "Deborshee Gogoi")
@@ -303,7 +302,7 @@ export function isFacultyNameMatch(name1: string = '', name2: string = ''): bool
     if (tokens1.length === 1 || tokens2.length === 1) return true;
     const second1 = tokens1[1];
     const second2 = tokens2[1];
-    if (second1 && second2 && (second1[0] === second2[0] || second1 === second2)) {
+    if (second1 && second2 && (second1 === second2 || (second1.length === 1 && second2.startsWith(second1)) || (second2.length === 1 && second1.startsWith(second2)))) {
       return true;
     }
   }
@@ -324,12 +323,7 @@ export function isPhoneMatch(p1?: string, p2?: string): boolean {
 
 export function generateSampleCsvContent(): string {
   return `Faculty ID,Faculty Name,Department,Subject Code,Subject Name,Room,Day,Start Time,End Time,Batch
-fac_1,Dr. Deborshee Gogoi,Commerce,COM101,Financial Accounting,Room No. C1,Monday,08:00,09:00,FYUGP 1st Sem Commerce
-fac_2,Dr. Sampreeti Boruah,Commerce,COM102,Business Law,Room No. C4,Monday,09:00,10:00,FYUGP 1st Sem Commerce
-fac_3,Dr. Murchana Gogoi,Commerce,ENG101,Business English,Room No. C9,Monday,11:00,12:00,HS 1st Yr Commerce
-fac_4,Dr. Subhadeep Chakraborty,Commerce,AEC101,Business Communication,Hall,Monday,11:00,12:00,FYUGP 1st Sem All
-fac_5,Dr. Viveka Gupta,Commerce,MAT101,Business Mathematics,Room No. C10,Monday,09:00,10:00,FYUGP 1st Sem Commerce
-fac_6,Pradip Chandra Das,Commerce,ACC101,Accountancy,Room No. C5,Monday,08:00,09:00,HS 1st Yr Commerce
-fac_7,Samim Sultana Bora,Commerce,ECO101,Microeconomics,Room No. C6,Monday,10:00,11:00,HS 1st Yr Commerce
+EMP-001,Faculty Member 1,Commerce,COM101,Financial Accounting,Room No. C1,Monday,08:00,09:00,FYUGP 1st Sem Commerce
+EMP-002,Faculty Member 2,Commerce,COM102,Business Law,Room No. C4,Monday,09:00,10:00,FYUGP 1st Sem Commerce
 `;
 }

@@ -19,32 +19,7 @@ interface ComplianceResearchViewProps {
   currentUser: User;
 }
 
-const DEFAULT_RESEARCH: ResearchRecord[] = [
-  {
-    id: 'res_1',
-    facultyId: 'fac_1',
-    title: 'Financial Inclusion and Digital Banking Adoption in Rural Assam: An Empirical Study',
-    type: 'Journal Paper',
-    journalOrPublisher: 'International Journal of Finance & Commerce (Scopus Indexed)',
-    year: 2024,
-    doiOrUrl: 'https://doi.org/10.1016/j.ijfc.2024.012',
-    authors: 'Dr. Deborshee Gogoi, Dr. Sampreeti Boruah',
-    remarks: 'Approved for UGC-CARE List Group I.',
-    dateLogged: '2024-03-15',
-  },
-  {
-    id: 'res_2',
-    facultyId: 'fac_1',
-    title: 'Impact of FYUGP Curriculum Framework on Higher Education Quality in North East India',
-    type: 'Conference',
-    journalOrPublisher: 'National Seminar on NEP 2020 Implementation, Gauhati University',
-    year: 2023,
-    doiOrUrl: 'https://digboicollege.edu.in/research/paper-2023',
-    authors: 'Dr. Deborshee Gogoi',
-    remarks: 'Keynote Speaker & Best Paper Award recipient.',
-    dateLogged: '2023-11-20',
-  },
-];
+const DEFAULT_RESEARCH: ResearchRecord[] = [];
 
 export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ currentUser }) => {
   const [researchList, setResearchList] = useState<ResearchRecord[]>(() => {
@@ -52,7 +27,10 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
       const saved = localStorage.getItem('classpilot_research_records');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.filter((r: ResearchRecord) => r.id !== 'res_1' && r.id !== 'res_2');
+          return cleaned;
+        }
       }
     } catch (e) {}
     return DEFAULT_RESEARCH;
@@ -65,7 +43,7 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
   const [formType, setFormType] = useState<ResearchRecord['type']>('Journal Paper');
   const [formJournal, setFormJournal] = useState<string>('');
   const [formYear, setFormYear] = useState<number>(2024);
-  const [formAuthors, setFormAuthors] = useState<string>(currentUser.name || 'Dr. Deborshee Gogoi');
+  const [formAuthors, setFormAuthors] = useState<string>(currentUser.name || '');
   const [formDoi, setFormDoi] = useState<string>('');
   const [formRemarks, setFormRemarks] = useState<string>('');
 

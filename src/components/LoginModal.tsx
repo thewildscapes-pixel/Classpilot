@@ -68,11 +68,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 } catch (e) {
                   const fallback: User = {
                     id: `user_google_${Date.now()}`,
-                    name: 'Dr. Deborshee Gogoi',
+                    name: 'Super Admin',
                     email: 'thewildscapes@gmail.com',
                     whatsappPhone: '9706375001',
                     role: 'admin',
-                    facultyId: 'fac_1',
                     department: 'Commerce',
                     isVerified: true,
                   };
@@ -113,11 +112,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
                 } catch (e) {
                   const fallback: User = {
                     id: `user_github_${Date.now()}`,
-                    name: 'Dr. Deborshee Gogoi (GitHub)',
+                    name: 'Super Admin',
                     email: 'thewildscapes@gmail.com',
                     whatsappPhone: '9706375001',
                     role: 'admin',
-                    facultyId: 'fac_1',
                     department: 'Commerce',
                     isVerified: true,
                   };

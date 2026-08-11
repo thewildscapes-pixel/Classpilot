@@ -46,7 +46,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
   // Logged-in Faculty Role & Profile Settings
   const [activeRole, setActiveRole] = useState<'educator' | 'mentor'>('educator');
-  const [facultyName, setFacultyName] = useState<string>(currentUser?.name || 'Dr. Deborshee Gogoi');
+  const [facultyName, setFacultyName] = useState<string>(currentUser?.name || '');
   const [designation, setDesignation] = useState<string>('Assistant Professor');
   const [department, setDepartment] = useState<string>(currentUser?.department || 'Commerce');
 
@@ -162,12 +162,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       // Fallback demo user if popup closed or blocked in iframe
       const fallbackUser: User = {
         id: `user_google_${Date.now()}`,
-        name: 'Dr. Deborshee Gogoi',
-        email: 'thewildscapes@gmail.com',
-        whatsappPhone: '9706375001',
+        name: 'Faculty Member',
+        email: email.trim() || '',
+        whatsappPhone: phone.trim() || '',
         role: 'faculty',
-        facultyId: 'fac_1',
-        department: 'Commerce',
+        department: department || 'General',
         isVerified: true,
       };
       setFacultyName(fallbackUser.name);
@@ -192,12 +191,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       // Fallback demo user if popup closed or unconfigured in iframe
       const fallbackUser: User = {
         id: `user_github_${Date.now()}`,
-        name: 'Dr. Deborshee Gogoi (GitHub)',
-        email: 'thewildscapes@gmail.com',
-        whatsappPhone: '9706375001',
+        name: 'Faculty Member',
+        email: email.trim() || '',
+        whatsappPhone: phone.trim() || '',
         role: 'faculty',
-        facultyId: 'fac_1',
-        department: 'Commerce',
+        department: department || 'General',
         isVerified: true,
       };
       setFacultyName(fallbackUser.name);
@@ -210,11 +208,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const handleEnterClassPilot = () => {
     const updatedUser: User = {
       id: currentUser?.id || `user_${Date.now()}`,
-      name: facultyName.trim() || 'Dr. Deborshee Gogoi',
-      email: currentUser?.email || email.trim() || 'deborsheegogoi@gmail.com',
-      whatsappPhone: currentUser?.whatsappPhone || phone.trim() || '9706375001',
+      name: facultyName.trim() || 'Faculty Member',
+      email: currentUser?.email || email.trim() || '',
+      whatsappPhone: currentUser?.whatsappPhone || phone.trim() || '',
       role: 'faculty',
-      facultyId: currentUser?.facultyId || 'fac_1',
+      facultyId: currentUser?.facultyId,
       department: department,
       isVerified: true,
     };

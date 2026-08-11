@@ -67,73 +67,16 @@ export const AdminNaacReports: React.FC<AdminNaacReportsProps> = ({
     try {
       const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
       if (saved) {
-        setDiaryEntries(JSON.parse(saved));
-        return;
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((entry: ClassDiaryEntry) => entry.id !== 'diary_1' && entry.id !== 'diary_2');
+          setDiaryEntries(cleaned);
+          return;
+        }
       }
     } catch (err) {}
 
-    // Initial default seed
-    const seeded: ClassDiaryEntry[] = [
-      {
-        id: 'diary_1',
-        facultyId: 'fac_1',
-        facultyName: 'Dr. Deborshee Gogoi',
-        department: 'Commerce',
-        date: new Date().toISOString().split('T')[0],
-        startTime: '09:00',
-        endTime: '10:00',
-        classStartTimestamp: Date.now() - 3600000 * 2,
-        subjectCode: 'COM-101',
-        subjectName: 'Financial Accounting',
-        batch: 'FYUGP 1st Sem - Commerce',
-        room: 'LH-01',
-        topicTaught: 'Journal Entries & Double Entry Bookkeeping Principles',
-        syllabusUnit: 'Unit 1: Accounting Framework',
-        durationMins: 60,
-        remarks: 'Class conducted smoothly with interactive numerical problem solving.',
-        attendance: [
-          { studentId: 'st_1', rollNo: 'COM-2024-01', name: 'Ananya Gogoi', status: 'Present' },
-          { studentId: 'st_2', rollNo: 'COM-2024-02', name: 'Bishal Sonowal', status: 'Present' },
-          { studentId: 'st_3', rollNo: 'COM-2024-03', name: 'Debashree Sharma', status: 'Present' },
-          { studentId: 'st_4', rollNo: 'COM-2024-04', name: 'Hemanta Baruah', status: 'Absent' },
-          { studentId: 'st_5', rollNo: 'COM-2024-05', name: 'Jubin Saikia', status: 'Present' },
-          { studentId: 'st_6', rollNo: 'COM-2024-06', name: 'Kavita Agarwal', status: 'Present' },
-        ],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isSynced: true,
-      },
-      {
-        id: 'diary_2',
-        facultyId: 'fac_2',
-        facultyName: 'Dr. Sampreeti Boruah',
-        department: 'Commerce',
-        date: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-        startTime: '11:00',
-        endTime: '12:00',
-        classStartTimestamp: Date.now() - 86400000,
-        subjectCode: 'COM-102',
-        subjectName: 'Business Organization',
-        batch: 'FYUGP 1st Sem - Commerce',
-        room: 'LH-02',
-        topicTaught: 'Forms of Business Enterprises: Sole Proprietorship & Partnership',
-        syllabusUnit: 'Unit 2: Business Forms',
-        durationMins: 60,
-        remarks: 'Case study on Partnership Deeds.',
-        attendance: [
-          { studentId: 'st_1', rollNo: 'COM-2024-01', name: 'Ananya Gogoi', status: 'Present' },
-          { studentId: 'st_2', rollNo: 'COM-2024-02', name: 'Bishal Sonowal', status: 'Present' },
-          { studentId: 'st_3', rollNo: 'COM-2024-03', name: 'Debashree Sharma', status: 'Absent' },
-          { studentId: 'st_4', rollNo: 'COM-2024-04', name: 'Hemanta Baruah', status: 'Absent' },
-          { studentId: 'st_5', rollNo: 'COM-2024-05', name: 'Jubin Saikia', status: 'Present' },
-          { studentId: 'st_6', rollNo: 'COM-2024-06', name: 'Kavita Agarwal', status: 'Present' },
-        ],
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        updatedAt: new Date(Date.now() - 86400000).toISOString(),
-        isSynced: true,
-      },
-    ];
-    setDiaryEntries(seeded);
+    setDiaryEntries([]);
   };
 
   // Filter entries

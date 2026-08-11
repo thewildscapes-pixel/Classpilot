@@ -163,22 +163,14 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
 
   // Filter timetable entries strictly for active target faculty
   const allFacultyEntries = timetable.filter((e) => {
-    // 1. Match by selectedFacultyId directly
-    if (selectedFacultyId && e.facultyId === selectedFacultyId) return true;
-
-    // 2. Direct match with current active faculty object
-    if (currentFaculty) {
-      if (e.facultyId && e.facultyId === currentFaculty.id) return true;
-      if (e.facultyName && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
-      if (currentFaculty.email && e.facultyName && e.facultyName.toLowerCase().includes(currentFaculty.email.split('@')[0].toLowerCase())) return true;
-    }
-
-    // 3. Match with currentUser properties if logged in
-    if (currentUser) {
+    // If logged-in user is a faculty member (non-admin), strictly scope to their identity
+    if (currentUser && currentUser.role === 'faculty') {
       if (currentUser.facultyId && e.facultyId === currentUser.facultyId) return true;
+      if (currentUser.employeeId && e.facultyId === currentUser.employeeId) return true;
       if (currentUser.name && isFacultyNameMatch(e.facultyName, currentUser.name)) return true;
+      if (currentUser.email && e.facultyName && e.facultyName.toLowerCase().includes(currentUser.email.split('@')[0].toLowerCase())) return true;
 
-      // Match via phone / email linkage in facultyList
+      // Match via phone / email / ID linkage in facultyList
       const matchedFacInList = facultyList.find(
         (f) => f.id === e.facultyId || isFacultyNameMatch(f.name, e.facultyName)
       );
@@ -193,6 +185,16 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
       ) {
         return true;
       }
+      return false;
+    }
+
+    // For Admin user, match by selected faculty dropdown ID or selected faculty object
+    if (selectedFacultyId && e.facultyId === selectedFacultyId) return true;
+
+    if (currentFaculty) {
+      if (e.facultyId && e.facultyId === currentFaculty.id) return true;
+      if (e.facultyName && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
+      if (currentFaculty.email && e.facultyName && e.facultyName.toLowerCase().includes(currentFaculty.email.split('@')[0].toLowerCase())) return true;
     }
 
     return false;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User, RoutineVersion, RoutineBackup } from '../types';
 import { AdminNaacReports } from './AdminNaacReports';
 import { AdminSqliteIntegrityView } from './AdminSqliteIntegrityView';
@@ -141,6 +141,75 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     } catch (e) {
       return timestampStr;
     }
+  };
+
+  const getRecentStatus = (entry: TimetableEntry): 'new' | 'modified' | null => {
+    if (!entry) return null;
+    const now = Date.now();
+    const THRESHOLD = 24 * 60 * 60 * 1000; // 24 hours threshold
+
+    // 1. Check createdAt timestamp first
+    if (entry.createdAt) {
+      const createdTime = new Date(entry.createdAt).getTime();
+      if (!isNaN(createdTime) && now - createdTime >= 0 && now - createdTime < THRESHOLD) {
+        return 'new';
+      }
+    }
+
+    // 2. Check entry ID timestamp pattern for newly generated entries
+    if (entry.id) {
+      const idMatch = entry.id.match(/^tt_(?:import_)?(\d{13})_/);
+      if (idMatch) {
+        const timestamp = parseInt(idMatch[1], 10);
+        if (!isNaN(timestamp) && now - timestamp >= 0 && now - timestamp < THRESHOLD) {
+          return 'new';
+        }
+      }
+    }
+
+    // 3. Check updatedAt or lastSyncedAt timestamp for modifications
+    const updateStr = entry.updatedAt || entry.lastSyncedAt;
+    if (updateStr) {
+      const updatedTime = new Date(updateStr).getTime();
+      if (!isNaN(updatedTime) && now - updatedTime >= 0 && now - updatedTime < THRESHOLD) {
+        return 'modified';
+      }
+    }
+
+    return null;
+  };
+
+  const RecentIndicatorBadge: React.FC<{ status: 'new' | 'modified' | null; compact?: boolean }> = ({
+    status,
+    compact,
+  }) => {
+    if (!status) return null;
+
+    if (status === 'new') {
+      return (
+        <span
+          className={`inline-flex items-center gap-1 font-extrabold uppercase tracking-wider rounded-full bg-emerald-500/25 text-emerald-300 border border-emerald-400/60 shadow-sm shadow-emerald-500/20 animate-pulse shrink-0 ${
+            compact ? 'px-1.5 py-0.2 text-[8px]' : 'px-2 py-0.5 text-[9px]'
+          }`}
+          title="Newly Added Class Entry"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+          <span>NEW</span>
+        </span>
+      );
+    }
+
+    return (
+      <span
+        className={`inline-flex items-center gap-1 font-extrabold uppercase tracking-wider rounded-full bg-amber-500/25 text-amber-300 border border-amber-400/60 shadow-sm shadow-amber-500/20 animate-pulse shrink-0 ${
+          compact ? 'px-1.5 py-0.2 text-[8px]' : 'px-2 py-0.5 text-[9px]'
+        }`}
+        title="Recently Modified Class Entry"
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />
+        <span>MODIFIED</span>
+      </span>
+    );
   };
 
   const handleSingleEntryResync = async (entry: TimetableEntry) => {
@@ -362,9 +431,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const handleDownloadFacultyCsvTemplate = () => {
     const csvHeaders = 'Faculty Name,Mobile Number,Employee ID,Department,Designation,Email\n';
     const sampleRows =
-      'Dr. Deborshee Gogoi,9706375001,DC-EMP-001,Commerce,Associate Professor,thewildscapes@gmail.com\n' +
-      'Dr. Jitu Borah,9876543210,DC-EMP-002,Economics,Assistant Professor,jitu.borah@digboicollege.edu.in\n' +
-      'Prof. Rashmi Saikia,9101234567,DC-EMP-003,Commerce,Assistant Professor,rashmi.s@digboicollege.edu.in\n';
+      'Faculty Member 1,9800000001,EMP-001,Commerce,Assistant Professor,faculty1@digboicollege.edu.in\n' +
+      'Faculty Member 2,9800000002,EMP-002,Economics,Assistant Professor,faculty2@digboicollege.edu.in\n';
     const blob = new Blob([csvHeaders + sampleRows], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -448,19 +516,13 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     const templateData = [
       {
         'Roll No.': 'COM-2025-01',
-        'Student Name': 'Ananya Gogoi',
+        'Student Name': 'Student Name 1',
         'Class': 'FYUGP 1st Sem Commerce',
         'Academic Year': sessionAcademicYear,
       },
       {
         'Roll No.': 'COM-2025-02',
-        'Student Name': 'Bishal Sonowal',
-        'Class': 'FYUGP 1st Sem Commerce',
-        'Academic Year': sessionAcademicYear,
-      },
-      {
-        'Roll No.': 'COM-2025-03',
-        'Student Name': 'Debashree Sharma',
+        'Student Name': 'Student Name 2',
         'Class': 'FYUGP 1st Sem Commerce',
         'Academic Year': sessionAcademicYear,
       },
@@ -589,8 +651,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         'Time Slot': '08:00 - 09:00',
         'Start Time': '08:00',
         'End Time': '09:00',
-        'Teacher / Faculty Name': 'Dr. Deborshee Gogoi',
-        'Faculty ID': 'fac_1',
+        'Teacher / Faculty Name': 'Faculty Member 1',
+        'Faculty ID': 'EMP-001',
         'Subject Code': 'COM101-MAJ',
         'Subject Name': 'Financial Accounting',
         'Classroom / Room': 'Room No. C1',
@@ -607,8 +669,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         'Time Slot': '09:00 - 10:00',
         'Start Time': '09:00',
         'End Time': '10:00',
-        'Teacher / Faculty Name': 'Dr. Sampreeti Boruah',
-        'Faculty ID': 'fac_2',
+        'Teacher / Faculty Name': 'Faculty Member 2',
+        'Faculty ID': 'EMP-002',
         'Subject Code': 'COM102-MIN',
         'Subject Name': 'Business Organisation',
         'Classroom / Room': 'Room No. C4',
@@ -668,6 +730,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [selectedProgramSemester, setSelectedProgramSemester] = useState<string>('All');
   const [filterDay, setFilterDay] = useState<string>('All');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showRecentOnly, setShowRecentOnly] = useState<boolean>(false);
 
   // Modals state
   const [isEntryModalOpen, setIsEntryModalOpen] = useState<boolean>(false);
@@ -1046,10 +1109,19 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     return true;
   });
 
+  const recentChangesCount = useMemo(() => {
+    return timetable.filter((e) => getRecentStatus(e) !== null).length;
+  }, [timetable]);
+
+  const displayList = useMemo(() => {
+    if (!showRecentOnly) return filteredList;
+    return filteredList.filter((e) => getRecentStatus(e) !== null);
+  }, [filteredList, showRecentOnly]);
+
   const selectedDeptFaculty = facultyList.filter(
     (f) => selectedDepartment === 'All' || f.department === selectedDepartment
   );
-  const selectedDeptClassCount = filteredList.length;
+  const selectedDeptClassCount = displayList.length;
 
   // Export Current Live Routine Database as Excel File retaining all details for future feed
   const handleExportLiveRoutineExcel = (dataToExport?: TimetableEntry[], customFileName?: string) => {
@@ -1280,7 +1352,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
           return {
             id: `tt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
-            facultyId: facMatch?.id || 'fac_1',
+            facultyId: facMatch?.id || (facName ? `fac_${facName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : 'fac_unassigned'),
             facultyName: facMatch?.name || facName,
             subjectCode: subjCode,
             subjectName: subjName,
@@ -1393,7 +1465,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     setFormSemesterCycle(activeSemesterCycle);
     setFormProgramSemester(selectedProgramSemester !== 'All' ? selectedProgramSemester : currentProgramList[0]);
     setFormPaperCategory('Major');
-    setFormFacultyId(defaultFac?.id || 'fac_1');
+    setFormFacultyId(defaultFac?.id || (facultyList.length > 0 ? facultyList[0].id : 'fac_unassigned'));
     setFormSubjectCode('COM101-MAJ');
     setFormSubjectName('Financial Accounting');
     setFormRoom('Room No. C1');
@@ -2047,7 +2119,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         </div>
 
         {/* ACADEMIC CYCLE TOGGLE & FILTERS BAR */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 bg-slate-900/90 rounded-xl p-3.5 border border-slate-700/80">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-900/90 rounded-xl p-3.5 border border-slate-700/80">
           {/* 1. Academic Cycle (Odd / Even Semesters) */}
           <div className="flex items-center space-x-3 bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
             <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
@@ -2069,7 +2141,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Odd Semesters (Aug–Dec)
+                  Odd Semesters
                 </button>
                 <button
                   onClick={() => {
@@ -2082,7 +2154,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Even Semesters (Jan–Jun)
+                  Even Semesters
                 </button>
               </div>
             </div>
@@ -2120,7 +2192,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             </div>
             <div className="flex-1">
               <label htmlFor="admin-prog-filter" className="text-[10px] font-bold uppercase tracking-wider text-amber-300 block mb-0.5">
-                Course / Semester ({activeSemesterCycle})
+                Course / Semester
               </label>
               <select
                 id="admin-prog-filter"
@@ -2135,6 +2207,45 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* 4. Recent Changes Filter & Pulsing Indicator Toggle */}
+          <div className="flex items-center space-x-3 bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
+              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300 block">
+                  Recent Changes Audit
+                </span>
+                <div className="flex items-center space-x-1">
+                  <RecentIndicatorBadge status="new" compact />
+                  <RecentIndicatorBadge status="modified" compact />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecentOnly((prev) => !prev)}
+                className={`w-full py-1 px-2.5 rounded-lg text-xs font-extrabold transition-all flex items-center justify-between border cursor-pointer ${
+                  showRecentOnly
+                    ? 'bg-amber-500 text-slate-950 border-amber-300 ring-2 ring-amber-400/50 shadow-md shadow-amber-500/20'
+                    : 'bg-slate-900 text-amber-300 hover:bg-slate-800 border-amber-500/40'
+                }`}
+                title="Filter view to show only recently created or modified class routine entries"
+              >
+                <div className="flex items-center space-x-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                  </span>
+                  <span>{showRecentOnly ? 'Showing Recent Only' : 'Filter Recent'}</span>
+                </div>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-slate-950 text-amber-300 border border-amber-500/40">
+                  {recentChangesCount}
+                </span>
+              </button>
             </div>
           </div>
         </div>
@@ -2252,7 +2363,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                         const slotEndMin = parseTimeToMinutes(slot.endTime);
 
                         // Find matching entries for this day & slot
-                        const slotEntries = filteredList.filter((e) => {
+                        const slotEntries = displayList.filter((e) => {
                           if (e.day !== day) return false;
                           const eStartMin = parseTimeToMinutes(e.startTime);
                           const eEndMin = parseTimeToMinutes(e.endTime);
@@ -2291,35 +2402,42 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                               </button>
                             ) : (
                               <div className="space-y-1.5">
-                                {slotEntries.map((entry) => (
-                                  <div
-                                    key={entry.id}
-                                    draggable={true}
-                                    onDragStart={(e) => handleDragStart(e, entry)}
-                                    className={`p-2 rounded-xl bg-slate-900 border shadow-md relative group transition-all cursor-grab active:cursor-grabbing ${
-                                      draggedEntry?.id === entry.id
-                                        ? 'border-amber-400 opacity-40 scale-95'
-                                        : 'border-slate-700 hover:border-indigo-500'
-                                    }`}
-                                  >
-                                    <div className="flex items-center justify-between gap-1 mb-1">
-                                      <div className="flex items-center space-x-1">
-                                        <GripVertical
-                                          className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 transition-colors shrink-0"
-                                          title="Drag class card to Quick Reschedule"
-                                        />
-                                        <span
-                                          className={`px-1.5 py-0.2 rounded border font-bold text-[9px] uppercase tracking-wide ${getPaperBadgeColor(
-                                            entry.paperCategory
-                                          )}`}
-                                        >
-                                          {entry.paperCategory || 'Core'}
+                                {slotEntries.map((entry) => {
+                                  const recentStatus = getRecentStatus(entry);
+                                  return (
+                                    <div
+                                      key={entry.id}
+                                      draggable={true}
+                                      onDragStart={(e) => handleDragStart(e, entry)}
+                                      className={`p-2 rounded-xl bg-slate-900 border shadow-md relative group transition-all cursor-grab active:cursor-grabbing ${
+                                        draggedEntry?.id === entry.id
+                                          ? 'border-amber-400 opacity-40 scale-95'
+                                          : recentStatus === 'new'
+                                          ? 'border-emerald-400/80 ring-2 ring-emerald-500/40 shadow-emerald-500/20 bg-gradient-to-b from-emerald-950/30 to-slate-900'
+                                          : recentStatus === 'modified'
+                                          ? 'border-amber-400/80 ring-2 ring-amber-500/40 shadow-amber-500/20 bg-gradient-to-b from-amber-950/30 to-slate-900'
+                                          : 'border-slate-700 hover:border-indigo-500'
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-1 mb-1">
+                                        <div className="flex items-center space-x-1 flex-wrap gap-0.5">
+                                          <GripVertical
+                                            className="w-3 h-3 text-slate-500 group-hover:text-indigo-400 transition-colors shrink-0"
+                                            title="Drag class card to Quick Reschedule"
+                                          />
+                                          <span
+                                            className={`px-1.5 py-0.2 rounded border font-bold text-[9px] uppercase tracking-wide ${getPaperBadgeColor(
+                                              entry.paperCategory
+                                            )}`}
+                                          >
+                                            {entry.paperCategory || 'Core'}
+                                          </span>
+                                          <RecentIndicatorBadge status={recentStatus} compact />
+                                        </div>
+                                        <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[9px]">
+                                          {entry.room}
                                         </span>
                                       </div>
-                                      <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[9px]">
-                                        {entry.room}
-                                      </span>
-                                    </div>
 
                                     <div className="font-bold text-white text-xs leading-snug line-clamp-2">
                                       {entry.subjectName}
@@ -2386,7 +2504,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                                       </button>
                                     </div>
                                   </div>
-                                ))}
+                                );
+                              })}
                               </div>
                             )}
                           </td>
@@ -2786,24 +2905,38 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-700/60 text-xs">
-                  {filteredList.length === 0 ? (
+                  {displayList.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-slate-400 text-xs font-medium">
                         No class routines found matching active cycle ({activeSemesterCycle}) and department options.
                       </td>
                     </tr>
                   ) : (
-                    filteredList.map((entry) => (
-                      <tr key={entry.id} className="hover:bg-slate-700/30 transition-colors">
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded border font-bold text-[10px] ${getPaperBadgeColor(
-                              entry.paperCategory
-                            )}`}
-                          >
-                            {entry.paperCategory || 'Core'}
-                          </span>
-                        </td>
+                    displayList.map((entry) => {
+                      const recentStatus = getRecentStatus(entry);
+                      return (
+                        <tr
+                          key={entry.id}
+                          className={`transition-colors ${
+                            recentStatus === 'new'
+                              ? 'bg-emerald-950/25 hover:bg-emerald-950/40 border-l-4 border-l-emerald-400'
+                              : recentStatus === 'modified'
+                              ? 'bg-amber-950/25 hover:bg-amber-950/40 border-l-4 border-l-amber-400'
+                              : 'hover:bg-slate-700/30'
+                          }`}
+                        >
+                          <td className="py-3 px-4">
+                            <div className="flex items-center space-x-1.5 flex-wrap gap-1">
+                              <span
+                                className={`px-2 py-0.5 rounded border font-bold text-[10px] ${getPaperBadgeColor(
+                                  entry.paperCategory
+                                )}`}
+                              >
+                                {entry.paperCategory || 'Core'}
+                              </span>
+                              <RecentIndicatorBadge status={recentStatus} />
+                            </div>
+                          </td>
                         <td className="py-3 px-4">
                           <div className="font-bold text-white">{entry.subjectName}</div>
                           <div className="text-[10px] text-slate-400 font-mono">{entry.subjectCode}</div>
@@ -2863,8 +2996,9 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                           </button>
                         </td>
                       </tr>
-                    ))
-                  )}
+                    );
+                  })
+                )}
                 </tbody>
               </table>
             </div>
@@ -2904,7 +3038,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             {/* Department Weekly Days Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {DAYS_OF_WEEK.map((day) => {
-                const dayEntries = filteredList
+                const dayEntries = displayList
                   .filter((t) => t.day === day)
                   .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
 
@@ -2924,19 +3058,30 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                       <p className="text-xs text-slate-500 italic py-4 text-center">No lectures scheduled for this day.</p>
                     ) : (
                       <div className="space-y-2">
-                        {dayEntries.map((item) => (
-                          <div
-                            key={item.id}
-                            className="bg-slate-800/90 p-3 rounded-lg border border-slate-700/60 hover:border-indigo-500/50 transition-all space-y-1 text-xs"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono font-bold text-indigo-300 text-[11px]">
-                                {item.startTime} - {item.endTime}
-                              </span>
-                              <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[10px]">
-                                {item.room}
-                              </span>
-                            </div>
+                        {dayEntries.map((item) => {
+                          const recentStatus = getRecentStatus(item);
+                          return (
+                            <div
+                              key={item.id}
+                              className={`p-3 rounded-lg transition-all space-y-1 text-xs ${
+                                recentStatus === 'new'
+                                  ? 'bg-slate-800/90 border-2 border-emerald-400/80 ring-2 ring-emerald-500/40 shadow-emerald-500/20'
+                                  : recentStatus === 'modified'
+                                  ? 'bg-slate-800/90 border-2 border-amber-400/80 ring-2 ring-amber-500/40 shadow-amber-500/20'
+                                  : 'bg-slate-800/90 border border-slate-700/60 hover:border-indigo-500/50'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="font-mono font-bold text-indigo-300 text-[11px]">
+                                  {item.startTime} - {item.endTime}
+                                </span>
+                                <div className="flex items-center space-x-1">
+                                  <RecentIndicatorBadge status={recentStatus} compact />
+                                  <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[10px]">
+                                    {item.room}
+                                  </span>
+                                </div>
+                              </div>
                             <div className="font-bold text-white text-xs">{item.subjectName} ({item.subjectCode})</div>
                             <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-700/50">
                               <span>Faculty: {item.facultyName}</span>
@@ -2961,7 +3106,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                               </div>
                             )}
                           </div>
-                        ))}
+                        );
+                      })}
                       </div>
                     )}
                   </div>
@@ -5483,7 +5629,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   {
     "subjectCode": "COM101",
     "subjectName": "Financial Accounting",
-    "facultyName": "Dr. Deborshee Gogoi",
+    "facultyName": "Faculty Member 1",
     "day": "Monday",
     "startTime": "09:00",
     "endTime": "10:00",

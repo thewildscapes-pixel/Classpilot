@@ -53,16 +53,7 @@ const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [
   { id: 'sys_6', subjectCode: 'CS-101', subjectName: 'Problem Solving using C', department: 'Computer Science', unitName: 'Unit 2: Functions & Pointers', topicTitle: 'Pointer Arithmetic & Memory Allocation', isCompleted: false },
 ];
 
-const DEFAULT_STUDENTS = [
-  { studentId: 'st_1', rollNo: 'COM-2025-01', name: 'Ananya Gogoi' },
-  { studentId: 'st_2', rollNo: 'COM-2025-02', name: 'Bishal Sonowal' },
-  { studentId: 'st_3', rollNo: 'COM-2025-03', name: 'Debashree Sharma' },
-  { studentId: 'st_4', rollNo: 'COM-2025-04', name: 'Hemanta Baruah' },
-  { studentId: 'st_5', rollNo: 'COM-2025-05', name: 'Jubin Saikia' },
-  { studentId: 'st_6', rollNo: 'COM-2025-06', name: 'Kavita Agarwal' },
-  { studentId: 'st_7', rollNo: 'COM-2025-07', name: 'Manash Protim Das' },
-  { studentId: 'st_8', rollNo: 'COM-2025-08', name: 'Nabanita Borgohain' },
-];
+const DEFAULT_STUDENTS: { studentId: string; rollNo: string; name: string }[] = [];
 
 export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   currentUser,
@@ -187,72 +178,16 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     try {
       const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
       if (saved) {
-        setDiaryEntries(JSON.parse(saved));
-        return;
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((entry: ClassDiaryEntry) => entry.id !== 'diary_1' && entry.id !== 'diary_2');
+          setDiaryEntries(cleaned);
+          return;
+        }
       }
     } catch (err) {}
 
-    // Seed default initial entries
-    const seeded: ClassDiaryEntry[] = [
-      {
-        id: 'diary_1',
-        facultyId: currentUser.facultyId || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: new Date().toISOString().split('T')[0],
-        startTime: '09:00',
-        endTime: '10:00',
-        classStartTimestamp: Date.now() - 3600000 * 2, // 2 hours ago (EDITABLE)
-        subjectCode: 'COM-101',
-        subjectName: 'Financial Accounting',
-        batch: 'FYUGP 1st Sem - Commerce',
-        room: 'LH-01',
-        topicTaught: 'Journal Entries & Double Entry Bookkeeping Principles',
-        syllabusUnit: 'Unit 1: Accounting Framework',
-        durationMins: 60,
-        remarks: 'Class conducted smoothly with interactive numerical problem solving.',
-        attendance: DEFAULT_STUDENTS.map((s, idx) => ({
-          studentId: s.studentId,
-          rollNo: s.rollNo,
-          name: s.name,
-          status: idx === 3 ? 'Absent' : 'Present',
-        })),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isSynced: true,
-      },
-      {
-        id: 'diary_2',
-        facultyId: currentUser.facultyId || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: new Date(Date.now() - 3600000 * 30).toISOString().split('T')[0],
-        startTime: '11:00',
-        endTime: '12:00',
-        classStartTimestamp: Date.now() - 3600000 * 30, // 30 hours ago (LOCKED)
-        subjectCode: 'COM-102',
-        subjectName: 'Business Organization',
-        batch: 'FYUGP 1st Sem - Commerce',
-        room: 'LH-02',
-        topicTaught: 'Forms of Business Enterprises: Sole Proprietorship & Partnership',
-        syllabusUnit: 'Unit 2: Business Forms',
-        durationMins: 60,
-        remarks: 'Group discussion held on partnership deed clauses.',
-        attendance: DEFAULT_STUDENTS.map((s, idx) => ({
-          studentId: s.studentId,
-          rollNo: s.rollNo,
-          name: s.name,
-          status: idx === 3 || idx === 5 ? 'Absent' : 'Present',
-        })),
-        createdAt: new Date(Date.now() - 3600000 * 30).toISOString(),
-        updatedAt: new Date(Date.now() - 3600000 * 30).toISOString(),
-        isSynced: true,
-      },
-    ];
-    setDiaryEntries(seeded);
-    try {
-      localStorage.setItem('classpilot_class_diary', JSON.stringify(seeded));
-    } catch (e) {}
+    setDiaryEntries([]);
   };
 
   const loadOfflineDrafts = () => {
@@ -393,7 +328,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     const newEntry: ClassDiaryEntry = {
       id: editingEntryId || `diary_${Date.now()}`,
       facultyId: currentUser.facultyId || 'fac_1',
-      facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
+      facultyName: currentUser.name || 'Faculty Member',
       department: currentUser.department || 'Commerce',
       date: formDate,
       startTime: formStartTime,

@@ -42,6 +42,7 @@ export interface TimetableEntry {
   paperCategory?: 'Major' | 'Minor' | 'MDC' | 'AEC' | 'SEC' | 'VAC' | 'Vocational' | 'HS Core' | 'PG Core' | 'PG Elective';
   notes?: string;
   isSubstitute?: boolean;
+  createdAt?: string;
   updatedAt?: string;
   lastSyncedAt?: string;
 }

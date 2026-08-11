@@ -57,8 +57,8 @@ export async function signInWithGoogleFirebase(): Promise<User> {
     // Create new faculty profile in Firestore linked to Auth UID
     appUser = {
       id: fbUser.uid,
-      name: fbUser.displayName || 'Dr. Deborshee Gogoi',
-      email: fbUser.email || 'thewildscapes@gmail.com',
+      name: fbUser.displayName || (fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' ? 'Super Admin' : 'Faculty Member'),
+      email: fbUser.email || '',
       whatsappPhone: '9706375001',
       role: fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' ? 'admin' : 'faculty',
       facultyId: `fac_${fbUser.uid.substring(0, 5)}`,
@@ -103,10 +103,10 @@ export async function signInWithGithubFirebase(): Promise<User> {
     };
   } else {
     // Create new faculty profile in Firestore linked to Auth UID
-    const githubEmail = fbUser.email || (fbUser.providerData?.[0]?.email) || 'thewildscapes@gmail.com';
+    const githubEmail = fbUser.email || (fbUser.providerData?.[0]?.email) || '';
     appUser = {
       id: fbUser.uid,
-      name: fbUser.displayName || 'Dr. Deborshee Gogoi',
+      name: fbUser.displayName || (githubEmail.toLowerCase().includes('thewildscapes') ? 'Super Admin' : 'Faculty Member'),
       email: githubEmail,
       whatsappPhone: '9706375001',
       role: githubEmail.toLowerCase().includes('thewildscapes') ? 'admin' : 'faculty',
@@ -318,7 +318,7 @@ export async function saveTimetableToFirestore(
         const nowIso = new Date().toISOString();
         const cleanEntry: TimetableEntry = {
           id: docId,
-          facultyId: entry.facultyId || 'fac_1',
+          facultyId: entry.facultyId || (entry.facultyName ? `fac_${entry.facultyName.toLowerCase().replace(/[^a-z0-9]/g, '_')}` : 'fac_unassigned'),
           facultyName: entry.facultyName || 'Faculty Member',
           subjectCode: entry.subjectCode || 'CS101',
           subjectName: entry.subjectName || 'General Subject',
@@ -371,8 +371,8 @@ export async function addTimetableEntryToFirestore(entryData: Partial<TimetableE
 
     const newEntry: TimetableEntry = {
       id: docId,
-      facultyId: entryData.facultyId || 'fac_1',
-      facultyName: entryData.facultyName || 'Dr. Deborshee Gogoi',
+      facultyId: entryData.facultyId || '',
+      facultyName: entryData.facultyName || 'Faculty Member',
       subjectCode: entryData.subjectCode || 'CS101',
       subjectName: entryData.subjectName || 'New Class',
       room: entryData.room || 'Room No. C1',
@@ -711,6 +711,9 @@ export async function rollbackRoutineToSnapshot(
  * Save a single Faculty record to Firestore collection `faculty`
  */
 export async function saveFacultyToFirestore(faculty: Faculty): Promise<{ success: boolean; error?: string }> {
+  let firestoreSuccess = false;
+  let firestoreError = '';
+
   try {
     const docRef = doc(db, 'faculty', faculty.id);
     await setDoc(
@@ -721,11 +724,31 @@ export async function saveFacultyToFirestore(faculty: Faculty): Promise<{ succes
       },
       { merge: true }
     );
-    return { success: true };
+    firestoreSuccess = true;
   } catch (err: any) {
-    console.error('Failed to save faculty to Firestore:', err);
-    return { success: false, error: err?.message || 'Failed to save faculty' };
+    firestoreError = err?.message || 'Firestore write failed';
+    console.warn('[saveFacultyToFirestore] Firestore write note:', firestoreError);
   }
+
+  // Dual-sync to Express API server database
+  try {
+    const res = await fetch('/api/faculty', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(faculty),
+    });
+    if (res.ok) {
+      return { success: true };
+    }
+  } catch (apiErr) {
+    console.warn('[saveFacultyToFirestore] Express API sync note:', apiErr);
+  }
+
+  if (firestoreSuccess) {
+    return { success: true };
+  }
+
+  return { success: false, error: firestoreError || 'Failed to save faculty record' };
 }
 
 /**

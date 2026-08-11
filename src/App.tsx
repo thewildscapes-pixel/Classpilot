@@ -82,7 +82,12 @@ export default function App() {
       const saved = localStorage.getItem('classpilot_faculty_list');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.filter(
+            (f: Faculty) => f.name !== 'Dr. Jitu Borah' && f.name !== 'Prof. Rashmi Saikia' && f.name !== 'Dr. Deborshee Gogoi' && f.id !== 'fac_1' && f.id !== 'fac_2' && f.id !== 'fac_3'
+          );
+          return cleaned;
+        }
       }
     } catch (e) {}
     return INITIAL_FACULTY;
@@ -93,25 +98,26 @@ export default function App() {
       const saved = localStorage.getItem('classpilot_room_list');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.filter((r: Room) => !['rm_1', 'rm_2', 'rm_3', 'rm_4', 'rm_5'].includes(r.id));
+          return cleaned;
+        }
       }
     } catch (e) {}
     return INITIAL_ROOMS;
   });
-  const [timetable, setTimetable] = useState<TimetableEntry[]>(() => {
-    try {
-      const saved = localStorage.getItem('classpilot_timetable');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {}
-    return INITIAL_TIMETABLE;
-  });
+  // Routine timetable loaded exclusively from central cloud database (Firestore / Express API)
+  const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [students, setStudents] = useState<Student[]>(() => {
     try {
       const saved = localStorage.getItem('classpilot_students');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.filter((s: Student) => !['st_1', 'st_2', 'st_3', 'st_4', 'st_5', 'st_6', 'st_7', 'st_8'].includes(s.id));
+          return cleaned;
+        }
+      }
     } catch (e) {}
     return INITIAL_STUDENTS;
   });
@@ -144,7 +150,7 @@ export default function App() {
 
   const [selectedFacultyId, setSelectedFacultyId] = useState<string>(() => {
     if (currentUser && currentUser.facultyId) return currentUser.facultyId;
-    return 'fac_1';
+    return '';
   });
 
   // Navigation tab
@@ -182,7 +188,7 @@ export default function App() {
 
 
   // Helper to resolve and link faculty record with step-by-step verification logging
-  const resolveFacultyForUser = (user: User, facList: Faculty[]): User => {
+  const resolveFacultyForUser = (user: User, facList: Faculty[], currentTimetable: TimetableEntry[] = []): User => {
     const rawName = user.name || '';
     const rawEmail = user.email || '';
     const rawPhone = user.phone || '';
@@ -209,97 +215,52 @@ export default function App() {
     });
     console.log(`[FacultyLookup] Total Faculty Records in Database: ${facList?.length || 0}`);
 
-    if (!facList || facList.length === 0) {
-      console.warn('[FacultyLookup] Faculty database list is empty! Cannot perform linkage lookup.');
-      console.groupEnd();
-      return user;
-    }
-
-    // Print summary table of available faculty in database
-    console.log('[FacultyLookup] Loaded Faculty Database Summary:');
-    console.table(
-      facList.map((f) => ({
-        ID: f.id,
-        Name: f.name,
-        Email: f.email || '(none)',
-        Phone: f.phone || f.whatsappPhone || '(none)',
-        Department: f.department || '(none)',
-      }))
-    );
-
     let matched: Faculty | undefined = undefined;
 
-    // Step 1: Direct ID Match
-    console.log(`[FacultyLookup] Step 1: Evaluating Direct ID Match ("${rawFacultyId}")...`);
-    if (rawFacultyId) {
-      matched = facList.find((f) => f.id === rawFacultyId);
-      if (matched) {
-        console.log(`[FacultyLookup] -> Step 1 MATCH FOUND by Direct ID! Found: "${matched.name}" (ID: "${matched.id}")`);
-      } else {
-        console.log(`[FacultyLookup] -> Step 1 NO MATCH for ID "${rawFacultyId}". Evaluated IDs:`, facList.map((f) => f.id));
+    if (facList && facList.length > 0) {
+      // Step 1: Direct ID Match
+      if (rawFacultyId) {
+        matched = facList.find((f) => f.id === rawFacultyId);
       }
-    } else {
-      console.log(`[FacultyLookup] -> Step 1 SKIPPED (No facultyId on user object).`);
+
+      // Step 2: Strict Case-Insensitive Email Match
+      if (!matched && cleanEmail) {
+        matched = facList.find((f) => f.email && f.email.toLowerCase().trim() === cleanEmail);
+      }
+
+      // Step 3: Phone / WhatsApp Match
+      if (!matched && (cleanPhone || cleanWhatsapp)) {
+        matched = facList.find(
+          (f) =>
+            isPhoneMatch(f.phone, cleanPhone) ||
+            isPhoneMatch(f.whatsappPhone, cleanPhone) ||
+            isPhoneMatch(f.phone, cleanWhatsapp) ||
+            isPhoneMatch(f.whatsappPhone, cleanWhatsapp)
+        );
+      }
+
+      // Step 4: Name Match (Case-insensitive & Token Match)
+      if (!matched && rawName) {
+        matched = facList.find((f) => f.name && isFacultyNameMatch(f.name, rawName));
+      }
     }
 
-    // Step 2: Strict Case-Insensitive Email Match
-    if (!matched && cleanEmail) {
-      console.log(`[FacultyLookup] Step 2: Evaluating Email Match ("${cleanEmail}")...`);
-      facList.forEach((f) => {
-        const facEmailClean = f.email ? f.email.toLowerCase().trim() : '';
-        console.log(`  Evaluating candidate "${f.name}" (ID: ${f.id}) - Faculty Email: "${facEmailClean}" vs User Email: "${cleanEmail}" -> Match: ${facEmailClean === cleanEmail}`);
-      });
-      matched = facList.find((f) => f.email && f.email.toLowerCase().trim() === cleanEmail);
-      if (matched) {
-        console.log(`[FacultyLookup] -> Step 2 MATCH FOUND by Email! Found: "${matched.name}" (ID: "${matched.id}")`);
-      } else {
-        console.log(`[FacultyLookup] -> Step 2 NO MATCH for Email "${cleanEmail}".`);
-      }
-    } else if (!matched) {
-      console.log(`[FacultyLookup] -> Step 2 SKIPPED (User email is empty).`);
-    }
-
-    // Step 3: Phone / WhatsApp Match
-    if (!matched && (cleanPhone || cleanWhatsapp)) {
-      console.log(`[FacultyLookup] Step 3: Evaluating Phone/WhatsApp Match (Phone: "${cleanPhone}", WhatsApp: "${cleanWhatsapp}")...`);
-      facList.forEach((f) => {
-        const m1 = isPhoneMatch(f.phone, cleanPhone);
-        const m2 = isPhoneMatch(f.whatsappPhone, cleanPhone);
-        const m3 = isPhoneMatch(f.phone, cleanWhatsapp);
-        const m4 = isPhoneMatch(f.whatsappPhone, cleanWhatsapp);
-        console.log(`  Evaluating candidate "${f.name}" (ID: ${f.id}) - Phone: "${f.phone}", WhatsApp: "${f.whatsappPhone}" -> Match Result: ${m1 || m2 || m3 || m4}`);
-      });
-      matched = facList.find(
-        (f) =>
-          isPhoneMatch(f.phone, cleanPhone) ||
-          isPhoneMatch(f.whatsappPhone, cleanPhone) ||
-          isPhoneMatch(f.phone, cleanWhatsapp) ||
-          isPhoneMatch(f.whatsappPhone, cleanWhatsapp)
+    // Step 5: Check Central Timetable Entries for matching faculty identity
+    if (!matched && currentTimetable && currentTimetable.length > 0 && rawName) {
+      const ttMatch = currentTimetable.find(
+        (e) => e.facultyName && isFacultyNameMatch(e.facultyName, rawName)
       );
-      if (matched) {
-        console.log(`[FacultyLookup] -> Step 3 MATCH FOUND by Phone! Found: "${matched.name}" (ID: "${matched.id}")`);
-      } else {
-        console.log(`[FacultyLookup] -> Step 3 NO MATCH for Phone/WhatsApp.`);
+      if (ttMatch) {
+        console.log(`[FacultyLookup] -> Step 5 MATCH FOUND in Central Timetable! Found: "${ttMatch.facultyName}" (ID: "${ttMatch.facultyId}")`);
+        matched = {
+          id: ttMatch.facultyId || `fac_${Date.now()}`,
+          name: ttMatch.facultyName,
+          email: cleanEmail || user.email || '',
+          department: ttMatch.department || user.department || 'Commerce',
+          designation: 'Faculty Member',
+          isVerified: true,
+        };
       }
-    } else if (!matched) {
-      console.log(`[FacultyLookup] -> Step 3 SKIPPED (User phone numbers are empty).`);
-    }
-
-    // Step 4: Name Match (Case-insensitive & Token Match)
-    if (!matched && rawName) {
-      console.log(`[FacultyLookup] Step 4: Evaluating Name Match ("${rawName}")...`);
-      facList.forEach((f) => {
-        const isMatch = isFacultyNameMatch(f.name, rawName);
-        console.log(`  Evaluating candidate "${f.name}" (ID: ${f.id}) vs User Name "${rawName}" -> isFacultyNameMatch: ${isMatch}`);
-      });
-      matched = facList.find((f) => f.name && isFacultyNameMatch(f.name, rawName));
-      if (matched) {
-        console.log(`[FacultyLookup] -> Step 4 MATCH FOUND by Name! Found: "${matched.name}" (ID: "${matched.id}")`);
-      } else {
-        console.log(`[FacultyLookup] -> Step 4 NO MATCH for Name "${rawName}".`);
-      }
-    } else if (!matched) {
-      console.log(`[FacultyLookup] -> Step 4 SKIPPED (User name is empty).`);
     }
 
     if (matched) {
@@ -314,8 +275,49 @@ export default function App() {
         department: user.department || matched.department,
       };
     } else {
+      // If user logs in as faculty/admin and no existing faculty matched, dynamically register clean profile
+      if ((user.role === 'faculty' || user.role === 'admin') && (rawName || cleanEmail)) {
+        const cleanFacName = rawName || user.name || 'Faculty Member';
+        const cleanFacId = rawFacultyId && rawFacultyId !== 'fac_2' && rawFacultyId !== 'fac_3'
+          ? rawFacultyId
+          : `fac_${Date.now()}`;
+
+        const newFacultyProfile: Faculty = {
+          id: cleanFacId,
+          name: cleanFacName,
+          email: cleanEmail || user.email || '',
+          phone: cleanPhone || user.phone || '',
+          whatsappPhone: cleanWhatsapp || user.whatsappPhone || cleanPhone || '',
+          department: user.department || 'Commerce',
+          designation: 'Faculty Member',
+          isVerified: true,
+        };
+
+        setFacultyList((prev) => {
+          const exists = prev.some((f) => f.id === cleanFacId || f.name.toLowerCase().trim() === cleanFacName.toLowerCase().trim());
+          if (!exists) {
+            const updated = [...prev, newFacultyProfile];
+            try {
+              localStorage.setItem('classpilot_faculty_list', JSON.stringify(updated));
+            } catch (e) {}
+            saveFacultyToFirestore(newFacultyProfile).catch(() => {});
+            return updated;
+          }
+          return prev;
+        });
+
+        console.log(`[FacultyLookup] Registered new clean faculty profile for "${cleanFacName}" (ID: ${cleanFacId})`);
+        console.groupEnd();
+        return {
+          ...user,
+          facultyId: cleanFacId,
+          name: cleanFacName,
+          department: user.department || newFacultyProfile.department,
+        };
+      }
+
       console.warn(
-        `[FacultyLookup] WARNING: Could not link user "${rawName}" (Email: "${rawEmail}", Phone: "${rawPhone}") to any registered faculty in database. Retaining default facultyId "${rawFacultyId}".`
+        `[FacultyLookup] Could not link user "${rawName}" (Email: "${rawEmail}", Phone: "${rawPhone}") to any existing faculty. Retaining default user state.`
       );
       console.groupEnd();
       return user;
@@ -324,7 +326,7 @@ export default function App() {
 
   // Login handler from Landing Page or Modal
   const handleLoginSuccess = (user: User, token?: string) => {
-    const resolvedUser = resolveFacultyForUser(user, facultyList);
+    const resolvedUser = resolveFacultyForUser(user, facultyList, timetable);
     setCurrentUser(resolvedUser);
     if (resolvedUser.facultyId) {
       setSelectedFacultyId(resolvedUser.facultyId);
@@ -343,12 +345,11 @@ export default function App() {
   // Explicit Logout handler
   const handleLogout = () => {
     setCurrentUser(null);
+    setSelectedFacultyId('');
+    setTimetable([]);
     firebaseSignOut().catch((e) => console.warn('Firebase signout:', e));
     try {
-      localStorage.removeItem('classpilot_user_session');
-      localStorage.removeItem('classpilot_user_token');
-      localStorage.removeItem('lecturapulse_user_session');
-      localStorage.removeItem('lecturapulse_user_token');
+      localStorage.clear();
     } catch (e) {
       console.warn('LocalStorage clear failed:', e);
     }
@@ -359,7 +360,7 @@ export default function App() {
     const unsubscribeAuth = listenToAuthChanges((fbAppUser) => {
       if (fbAppUser) {
         console.log('[AuthPersistence] Firebase auth re-synced session for user:', fbAppUser.email);
-        const resolvedUser = resolveFacultyForUser(fbAppUser, facultyList);
+        const resolvedUser = resolveFacultyForUser(fbAppUser, facultyList, timetable);
         setCurrentUser(resolvedUser);
         if (resolvedUser.facultyId) {
           setSelectedFacultyId(resolvedUser.facultyId);
@@ -377,13 +378,13 @@ export default function App() {
     return () => {
       unsubscribeAuth();
     };
-  }, [facultyList]);
+  }, [facultyList, timetable]);
 
   // Auto-sync logged-in currentUser with facultyList to ensure facultyId points directly to their official routine
   useEffect(() => {
-    if (!currentUser || facultyList.length === 0) return;
+    if (!currentUser) return;
 
-    const resolvedUser = resolveFacultyForUser(currentUser, facultyList);
+    const resolvedUser = resolveFacultyForUser(currentUser, facultyList, timetable);
 
     if (resolvedUser.facultyId !== currentUser.facultyId) {
       console.log(
@@ -395,10 +396,10 @@ export default function App() {
       } catch (e) {}
     }
 
-    if (resolvedUser.facultyId && selectedFacultyId !== resolvedUser.facultyId) {
+    if (resolvedUser.facultyId && selectedFacultyId !== resolvedUser.facultyId && currentUser.role === 'faculty') {
       setSelectedFacultyId(resolvedUser.facultyId);
     }
-  }, [currentUser, facultyList]);
+  }, [currentUser, facultyList, timetable]);
 
   // Time & Demo Simulation
   const [realTimeOffsetMs, setRealTimeOffsetMs] = useState<number>(0);
@@ -447,17 +448,9 @@ export default function App() {
             body: JSON.stringify({ entries, replaceExisting: true }),
           }).catch((e) => {});
         } else {
-          // If Firestore is empty, check if we have an uploaded routine in localStorage
+          setTimetable([]);
           try {
-            const saved = localStorage.getItem('classpilot_timetable');
-            if (saved) {
-              const parsed = JSON.parse(saved);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                console.log('[FirestoreSync] Uploading saved local routine to Firestore...');
-                saveTimetableToFirestore(parsed, true);
-                setTimetable(parsed);
-              }
-            }
+            localStorage.removeItem('classpilot_timetable');
           } catch (e) {}
         }
       }
@@ -818,6 +811,7 @@ export default function App() {
 
   // --- CRUD API HANDLERS ---
   const handleAddEntry = async (entryData: Partial<TimetableEntry>) => {
+    const nowIso = new Date().toISOString();
     const newEntry: TimetableEntry = {
       id: entryData.id || `tt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       facultyId: entryData.facultyId || 'fac_1',
@@ -835,6 +829,9 @@ export default function App() {
       paperCategory: entryData.paperCategory || 'Major',
       notes: entryData.notes || '',
       isSubstitute: entryData.isSubstitute || false,
+      createdAt: entryData.createdAt || nowIso,
+      updatedAt: nowIso,
+      lastSyncedAt: nowIso,
     };
 
     setTimetable((prev) => {
@@ -861,15 +858,22 @@ export default function App() {
   };
 
   const handleUpdateEntry = async (id: string, entryData: Partial<TimetableEntry>) => {
+    const nowIso = new Date().toISOString();
+    const patch = {
+      ...entryData,
+      updatedAt: nowIso,
+      lastSyncedAt: nowIso,
+    };
+
     setTimetable((prev) => {
-      const updated = prev.map((t) => (t.id === id ? { ...t, ...entryData } : t));
+      const updated = prev.map((t) => (t.id === id ? { ...t, ...patch } : t));
       try {
         localStorage.setItem('classpilot_timetable', JSON.stringify(updated));
       } catch (e) {}
       return updated;
     });
 
-    updateTimetableEntryInFirestore(id, entryData).catch((err) =>
+    updateTimetableEntryInFirestore(id, patch).catch((err) =>
       console.warn('Firestore update entry notice:', err)
     );
 
@@ -877,7 +881,7 @@ export default function App() {
       await fetch(`/api/timetable/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entryData),
+        body: JSON.stringify(patch),
       });
     } catch (e) {
       console.log('Updated API locally');
@@ -936,6 +940,7 @@ export default function App() {
         createdNewFacultyList.push(matchedFac);
       }
 
+      const nowIso = new Date().toISOString();
       return {
         id: e.id || `tt_import_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
         facultyId: matchedFac ? matchedFac.id : e.facultyId || 'fac_1',
@@ -953,6 +958,9 @@ export default function App() {
         paperCategory: e.paperCategory || 'Major',
         notes: e.notes || '',
         isSubstitute: e.isSubstitute || false,
+        createdAt: e.createdAt || nowIso,
+        updatedAt: nowIso,
+        lastSyncedAt: nowIso,
       };
     });
 

@@ -206,70 +206,14 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_diary_faculty ON class_diary(facultyId);
   `);
 
-  // Seed initial tables if empty
-  const facCountRes = db.exec('SELECT COUNT(*) as count FROM faculty');
-  const facCount = facCountRes.length > 0 && facCountRes[0].values.length > 0 ? (facCountRes[0].values[0][0] as number) : 0;
-  if (facCount === 0) {
-    console.log('🌱 Seeding initial faculty roster into SQLite...');
-    INITIAL_FACULTY.forEach((f) => {
-      runSql(
-        'INSERT OR REPLACE INTO faculty (id, name, email, department, designation, phone, whatsappPhone, employeeId, isVerified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [f.id, f.name, f.email, f.department, f.designation, f.phone || '', f.whatsappPhone || '', f.employeeId || '', f.isVerified ? 1 : 0]
-      );
-    });
-  }
-
-  const rmCountRes = db.exec('SELECT COUNT(*) as count FROM rooms');
-  const rmCount = rmCountRes.length > 0 && rmCountRes[0].values.length > 0 ? (rmCountRes[0].values[0][0] as number) : 0;
-  if (rmCount === 0) {
-    console.log('🌱 Seeding initial rooms into SQLite...');
-    INITIAL_ROOMS.forEach((r) => {
-      runSql(
-        'INSERT OR REPLACE INTO rooms (id, name, building, floor, capacity, type, equipment) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [r.id, r.name, r.building || '', r.floor || 1, r.capacity || 50, r.type || 'Classroom', r.equipment || '']
-      );
-    });
-  }
-
-  const ttCountRes = db.exec('SELECT COUNT(*) as count FROM timetable');
-  const ttCount = ttCountRes.length > 0 && ttCountRes[0].values.length > 0 ? (ttCountRes[0].values[0][0] as number) : 0;
-  if (ttCount === 0) {
-    console.log('🌱 Seeding initial timetable into SQLite...');
-    INITIAL_TIMETABLE.forEach((t) => {
-      runSql(
-        'INSERT OR REPLACE INTO timetable (id, facultyId, facultyName, subjectCode, subjectName, room, day, startTime, endTime, batch, department, semesterCycle, programSemester, paperCategory, notes, isSubstitute) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [
-          t.id,
-          t.facultyId,
-          t.facultyName,
-          t.subjectCode,
-          t.subjectName,
-          t.room,
-          t.day,
-          t.startTime,
-          t.endTime,
-          t.batch,
-          t.department,
-          t.semesterCycle || 'Odd',
-          t.programSemester || 'FYUGP 1st Semester',
-          t.paperCategory || 'Major',
-          t.notes || '',
-          t.isSubstitute ? 1 : 0,
-        ]
-      );
-    });
-  }
-
-  const stCountRes = db.exec('SELECT COUNT(*) as count FROM students');
-  const stCount = stCountRes.length > 0 && stCountRes[0].values.length > 0 ? (stCountRes[0].values[0][0] as number) : 0;
-  if (stCount === 0) {
-    console.log('🌱 Seeding initial student dataset into SQLite...');
-    INITIAL_STUDENTS.forEach((s) => {
-      runSql(
-        'INSERT OR REPLACE INTO students (id, rollNo, name, classBatch, section, academicYear, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [s.id, s.rollNo, s.name, s.classBatch, s.section, s.academicYear, s.sessionId]
-      );
-    });
+  // Clean database cleanup: Remove legacy mock/dummy seed entries if present
+  try {
+    runSql("DELETE FROM timetable WHERE id LIKE 'tt_dg_%' OR id LIKE 'tt_jb_%' OR id LIKE 'tt_rs_%'");
+    runSql("DELETE FROM faculty WHERE id IN ('fac_1', 'fac_2', 'fac_3') AND name IN ('Dr. Deborshee Gogoi', 'Dr. Jitu Borah', 'Prof. Rashmi Saikia')");
+    runSql("DELETE FROM students WHERE id IN ('st_1', 'st_2', 'st_3', 'st_4', 'st_5', 'st_6', 'st_7', 'st_8') AND name IN ('Ananya Gogoi', 'Bishal Sonowal', 'Debashree Sharma', 'Hemanta Baruah', 'Jubin Saikia', 'Kavita Agarwal', 'Manash Protim Das', 'Nabanita Borgohain')");
+    runSql("DELETE FROM rooms WHERE id IN ('rm_1', 'rm_2', 'rm_3', 'rm_4', 'rm_5') AND name LIKE 'Room No.%'");
+  } catch (e) {
+    console.warn('Notice cleaning legacy mock SQLite rows:', e);
   }
 
   saveDbToDisk();
