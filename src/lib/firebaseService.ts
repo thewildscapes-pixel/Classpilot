@@ -225,6 +225,25 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
       const entries: TimetableEntry[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
+
+        let formattedSyncTime = '';
+        if (data.updatedAt) {
+          if (typeof data.updatedAt.toDate === 'function') {
+            formattedSyncTime = data.updatedAt.toDate().toISOString();
+          } else if (typeof data.updatedAt === 'string') {
+            formattedSyncTime = data.updatedAt;
+          } else if (typeof data.updatedAt === 'number') {
+            formattedSyncTime = new Date(data.updatedAt).toISOString();
+          }
+        }
+        if (!formattedSyncTime && data.lastSyncedAt) {
+          if (typeof data.lastSyncedAt === 'string') {
+            formattedSyncTime = data.lastSyncedAt;
+          } else if (typeof data.lastSyncedAt === 'number') {
+            formattedSyncTime = new Date(data.lastSyncedAt).toISOString();
+          }
+        }
+
         entries.push({
           id: docSnap.id,
           facultyId: data.facultyId || '',
@@ -242,6 +261,8 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
           paperCategory: data.paperCategory || 'Major',
           notes: data.notes || '',
           isSubstitute: data.isSubstitute || false,
+          updatedAt: formattedSyncTime || data.updatedAt || undefined,
+          lastSyncedAt: formattedSyncTime || data.lastSyncedAt || undefined,
         });
       });
 
@@ -294,6 +315,7 @@ export async function saveTimetableToFirestore(
         const docId = entry.id || `tt_${Date.now()}_${i + idx}_${Math.random().toString(36).substring(2, 6)}`;
         const docRef = doc(db, 'timetables', docId);
 
+        const nowIso = new Date().toISOString();
         const cleanEntry: TimetableEntry = {
           id: docId,
           facultyId: entry.facultyId || 'fac_1',
@@ -311,6 +333,8 @@ export async function saveTimetableToFirestore(
           paperCategory: entry.paperCategory || 'Major',
           notes: entry.notes || '',
           isSubstitute: Boolean(entry.isSubstitute),
+          lastSyncedAt: nowIso,
+          updatedAt: nowIso,
         };
 
         // Deep sanitize to prevent any undefined fields from throwing Firestore error
@@ -319,6 +343,7 @@ export async function saveTimetableToFirestore(
         batch.set(docRef, {
           ...sanitized,
           updatedAt: serverTimestamp(),
+          lastSyncedAt: nowIso,
         });
       });
 
@@ -386,6 +411,43 @@ export async function updateTimetableEntryInFirestore(id: string, entryData: Par
   } catch (err: any) {
     console.error('Failed to update entry in Firestore:', err);
     return { success: false, error: err?.message || 'Failed to update entry' };
+  }
+}
+
+/**
+ * Re-sync / Force Upload a single timetable record to Firestore
+ */
+export async function resyncSingleTimetableEntryInFirestore(
+  entry: TimetableEntry
+): Promise<{ success: boolean; lastSyncedAt?: string; error?: string }> {
+  try {
+    const docId = entry.id || `tt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const docRef = doc(db, 'timetables', docId);
+    const nowIso = new Date().toISOString();
+
+    const cleanEntry: TimetableEntry = {
+      ...entry,
+      id: docId,
+      lastSyncedAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const sanitized = JSON.parse(JSON.stringify(cleanEntry));
+
+    await setDoc(
+      docRef,
+      {
+        ...sanitized,
+        updatedAt: serverTimestamp(),
+        lastSyncedAt: nowIso,
+      },
+      { merge: true }
+    );
+
+    return { success: true, lastSyncedAt: nowIso };
+  } catch (err: any) {
+    console.error('Failed to re-sync single entry to Firestore:', err);
+    return { success: false, error: err?.message || 'Failed to re-sync entry to Firestore' };
   }
 }
 

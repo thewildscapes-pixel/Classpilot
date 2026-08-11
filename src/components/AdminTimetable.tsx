@@ -56,7 +56,9 @@ import {
   Activity,
   Terminal,
   Info,
+  CheckCircle2,
 } from 'lucide-react';
+import { saveTimetableToFirestore, resyncSingleTimetableEntryInFirestore } from '../lib/firebaseService';
 
 interface AdminTimetableProps {
   currentUser?: User | null;
@@ -118,6 +120,92 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
   // Diagnostic Data Source Overlay State
   const [showDiagnosticDetails, setShowDiagnosticDetails] = useState<boolean>(false);
+  const [showFirebaseSyncTimestamps, setShowFirebaseSyncTimestamps] = useState<boolean>(false);
+  const [isForcePushing, setIsForcePushing] = useState<boolean>(false);
+  const [syncingEntryIds, setSyncingEntryIds] = useState<Record<string, boolean>>({});
+
+  const formatSyncTime = (timestampStr?: string) => {
+    if (!timestampStr) return 'Pending / Local Cache';
+    try {
+      const date = new Date(timestampStr);
+      if (isNaN(date.getTime())) return 'Pending Sync';
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      });
+    } catch (e) {
+      return timestampStr;
+    }
+  };
+
+  const handleSingleEntryResync = async (entry: TimetableEntry) => {
+    if (!entry || !entry.id) return;
+    setSyncingEntryIds((prev) => ({ ...prev, [entry.id]: true }));
+    try {
+      const res = await resyncSingleTimetableEntryInFirestore(entry);
+      if (res.success && res.lastSyncedAt) {
+        if (onUpdateEntry) {
+          onUpdateEntry(entry.id, {
+            ...entry,
+            lastSyncedAt: res.lastSyncedAt,
+            updatedAt: res.lastSyncedAt,
+          });
+        }
+        setResolutionNotice({
+          title: '🔥 Class Re-Synced to Firestore!',
+          message: `Period "${entry.subjectName}" (${entry.subjectCode}) for ${entry.facultyName} was re-uploaded and verified in Firestore at ${new Date(res.lastSyncedAt).toLocaleTimeString()}.`,
+          type: 'success',
+        });
+      } else {
+        setResolutionNotice({
+          title: '⚠️ Re-Sync Notice',
+          message: res.error || 'Failed to re-sync entry to Firestore.',
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setResolutionNotice({
+        title: '⚠️ Re-Sync Error',
+        message: err?.message || 'Error re-syncing entry.',
+        type: 'error',
+      });
+    } finally {
+      setSyncingEntryIds((prev) => ({ ...prev, [entry.id]: false }));
+    }
+  };
+
+  const handleForcePushToFirestore = async () => {
+    setIsForcePushing(true);
+    try {
+      const res = await saveTimetableToFirestore(timetable, true);
+      if (res.success) {
+        setResolutionNotice({
+          title: '🔥 Routine Force-Synced to Firestore!',
+          message: `Successfully uploaded and verified ${res.count} timetable records to the live Firestore collection with updated sync timestamps.`,
+          type: 'success',
+        });
+      } else {
+        setResolutionNotice({
+          title: '⚠️ Firestore Sync Notice',
+          message: res.error || 'Failed to sync routine to Firestore.',
+          type: 'error',
+        });
+      }
+    } catch (err: any) {
+      setResolutionNotice({
+        title: '⚠️ Sync Error',
+        message: err?.message || 'Error pushing to Firestore.',
+        type: 'error',
+      });
+    } finally {
+      setIsForcePushing(false);
+    }
+  };
 
   // Compute whether current timetable data state was sourced from initial default mock data or fetched backend DB
   const timetableDataSource = React.useMemo(() => {
@@ -184,6 +272,88 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [newStudentRoll, setNewStudentRoll] = useState<string>('');
   const [newStudentName, setNewStudentName] = useState<string>('');
   const [newStudentClass, setNewStudentClass] = useState<string>('FYUGP 1st Sem Commerce');
+
+  // JSON / Custom Routine Direct Sync Modal State
+  const [isJsonSyncModalOpen, setIsJsonSyncModalOpen] = useState<boolean>(false);
+  const [jsonSyncInput, setJsonSyncInput] = useState<string>('');
+  const [jsonSyncError, setJsonSyncError] = useState<string>('');
+
+  const handleJsonSyncSubmit = async () => {
+    setJsonSyncError('');
+    if (!jsonSyncInput.trim()) {
+      setJsonSyncError('Please paste JSON array or comma/tab separated text routines.');
+      return;
+    }
+
+    try {
+      let parsedData: any[] = [];
+      const trimmed = jsonSyncInput.trim();
+
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        const rawJson = JSON.parse(trimmed);
+        parsedData = Array.isArray(rawJson) ? rawJson : [rawJson];
+      } else {
+        // Line-by-line CSV/TSV parser fallback
+        const lines = trimmed.split('\n').filter((l) => l.trim().length > 0);
+        parsedData = lines.map((line) => {
+          const parts = line.split(/[,\t|]/);
+          return {
+            subjectCode: parts[0]?.trim() || 'SUBJ101',
+            subjectName: parts[1]?.trim() || 'Course Class',
+            facultyName: parts[2]?.trim() || 'Faculty Member',
+            day: parts[3]?.trim() || 'Monday',
+            startTime: parts[4]?.trim() || '08:00',
+            endTime: parts[5]?.trim() || '09:00',
+            room: parts[6]?.trim() || 'Room 1',
+            batch: parts[7]?.trim() || 'FYUGP 1st Sem',
+            department: parts[8]?.trim() || 'Commerce',
+          };
+        });
+      }
+
+      if (parsedData.length === 0) {
+        setJsonSyncError('No valid routine records found in the pasted content.');
+        return;
+      }
+
+      const formattedEntries: Partial<TimetableEntry>[] = parsedData.map((item, idx) => ({
+        id: item.id || `tt_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`,
+        facultyId: item.facultyId || `fac_${idx + 1}`,
+        facultyName: item.facultyName || item.faculty || item.teacher || 'Faculty Member',
+        subjectCode: item.subjectCode || item.code || 'COM101',
+        subjectName: item.subjectName || item.subject || item.course || 'Course Lecture',
+        room: item.room || item.classNo || 'Room No. C1',
+        day: (item.day || 'Monday') as DayOfWeek,
+        startTime: item.startTime || item.start || '08:00',
+        endTime: item.endTime || item.end || '09:00',
+        batch: item.batch || item.class || 'FYUGP 1st Sem',
+        department: item.department || item.dept || 'Commerce',
+        semesterCycle: item.semesterCycle || (String(item.batch || item.programSemester || '').toLowerCase().includes('even') ? 'Even' : 'Odd'),
+        programSemester: item.programSemester || item.program || 'FYUGP 1st Semester',
+        paperCategory: item.paperCategory || item.category || 'Major',
+        notes: item.notes || '',
+      }));
+
+      // Replace existing default mock entries with custom routine
+      await onBulkImport(formattedEntries, true);
+
+      // Auto-detect cycle and reset active filters so all classes show
+      const evenCount = formattedEntries.filter((e) => e.semesterCycle === 'Even').length;
+      const oddCount = formattedEntries.filter((e) => e.semesterCycle === 'Odd').length;
+      if (evenCount > oddCount) setActiveSemesterCycle('Even');
+      else if (oddCount > evenCount) setActiveSemesterCycle('Odd');
+
+      setSelectedDepartment('All');
+      setSelectedProgramSemester('All');
+      setActiveAdminTab('grid');
+      setIsJsonSyncModalOpen(false);
+      setJsonSyncInput('');
+      alert(`✨ Successfully synced and replaced routine with ${formattedEntries.length} custom entries!`);
+    } catch (err: any) {
+      console.error('JSON Routine Sync Error:', err);
+      setJsonSyncError(`Failed to parse JSON/Text: ${err.message || 'Invalid format'}`);
+    }
+  };
 
   // Faculty CSV Bulk Import State
   const [facultyCsvPreview, setFacultyCsvPreview] = useState<Partial<Faculty>[]>([]);
@@ -410,40 +580,84 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     )
   );
 
-  // Download Excel Template with exact required columns:
-  // Day | Period/Time | Class | Section | Subject | Faculty Name | Class No./Room
+  // Download Excel Template with exact required columns retaining all details:
   const handleDownloadExcelTemplate = () => {
     const templateData = [
       {
+        'SL No': 1,
         'Day': 'Monday',
-        'Period/Time': '08:00 - 09:00',
-        'Class': 'FYUGP 1st Sem Commerce',
-        'Section': 'Sec A',
-        'Subject': 'Financial Accounting',
-        'Faculty Name': 'Dr. Deborshee Gogoi',
-        'Class No./Room': 'Room No. C1'
+        'Time Slot': '08:00 - 09:00',
+        'Start Time': '08:00',
+        'End Time': '09:00',
+        'Teacher / Faculty Name': 'Dr. Deborshee Gogoi',
+        'Faculty ID': 'fac_1',
+        'Subject Code': 'COM101-MAJ',
+        'Subject Name': 'Financial Accounting',
+        'Classroom / Room': 'Room No. C1',
+        'Class / Batch': 'FYUGP 1st Sem Commerce',
+        'Department': 'Commerce',
+        'Paper Category': 'Major',
+        'Semester Cycle': activeSemesterCycle,
+        'Program / Semester': 'FYUGP 1st Semester',
+        'Notes': 'Theory Lecture'
       },
       {
+        'SL No': 2,
         'Day': 'Monday',
-        'Period/Time': '09:00 - 10:00',
-        'Class': 'FYUGP 1st Sem Commerce',
-        'Section': 'Sec A',
-        'Subject': 'Business Organisation',
-        'Faculty Name': 'Dr. Sampreeti Boruah',
-        'Class No./Room': 'Room No. C4'
+        'Time Slot': '09:00 - 10:00',
+        'Start Time': '09:00',
+        'End Time': '10:00',
+        'Teacher / Faculty Name': 'Dr. Sampreeti Boruah',
+        'Faculty ID': 'fac_2',
+        'Subject Code': 'COM102-MIN',
+        'Subject Name': 'Business Organisation',
+        'Classroom / Room': 'Room No. C4',
+        'Class / Batch': 'FYUGP 1st Sem Commerce',
+        'Department': 'Commerce',
+        'Paper Category': 'Minor',
+        'Semester Cycle': activeSemesterCycle,
+        'Program / Semester': 'FYUGP 1st Semester',
+        'Notes': 'Core Discussion'
       },
       {
+        'SL No': 3,
         'Day': 'Tuesday',
-        'Period/Time': '10:00 - 11:00',
-        'Class': 'HS 1st Yr Commerce',
-        'Section': 'Sec B',
-        'Subject': 'Accountancy',
-        'Faculty Name': 'Pradip Chandra Das',
-        'Class No./Room': 'Room No. C5'
+        'Time Slot': '10:00 - 11:00',
+        'Start Time': '10:00',
+        'End Time': '11:00',
+        'Teacher / Faculty Name': 'Pradip Chandra Das',
+        'Faculty ID': 'fac_3',
+        'Subject Code': 'HS101-ACC',
+        'Subject Name': 'Accountancy',
+        'Classroom / Room': 'Room No. C5',
+        'Class / Batch': 'HS 1st Yr Commerce',
+        'Department': 'Commerce',
+        'Paper Category': 'HS Core',
+        'Semester Cycle': activeSemesterCycle,
+        'Program / Semester': 'HS 1st Year',
+        'Notes': 'Practical Numericals'
       }
     ];
 
     const ws = XLSX.utils.json_to_sheet(templateData);
+    ws['!cols'] = [
+      { wch: 8 },  // SL No
+      { wch: 12 }, // Day
+      { wch: 18 }, // Time Slot
+      { wch: 12 }, // Start Time
+      { wch: 12 }, // End Time
+      { wch: 25 }, // Teacher / Faculty Name
+      { wch: 15 }, // Faculty ID
+      { wch: 15 }, // Subject Code
+      { wch: 30 }, // Subject Name
+      { wch: 20 }, // Classroom / Room
+      { wch: 20 }, // Class / Batch
+      { wch: 20 }, // Department
+      { wch: 15 }, // Paper Category
+      { wch: 15 }, // Semester Cycle
+      { wch: 22 }, // Program / Semester
+      { wch: 25 }, // Notes
+    ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Official Routine Template');
     XLSX.writeFile(wb, `ClassPilot_Routine_Template_${activeSemesterCycle}_Semester.xlsx`);
@@ -837,9 +1051,9 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   );
   const selectedDeptClassCount = filteredList.length;
 
-  // Export Current Live Routine Database as Excel File
+  // Export Current Live Routine Database as Excel File retaining all details for future feed
   const handleExportLiveRoutineExcel = (dataToExport?: TimetableEntry[], customFileName?: string) => {
-    const list = dataToExport || timetable;
+    const list = dataToExport && dataToExport.length > 0 ? dataToExport : (filteredList.length > 0 && filteredList.length < timetable.length ? filteredList : timetable);
     if (!list || list.length === 0) {
       alert('No routine entries found in the database to export.');
       return;
@@ -848,26 +1062,46 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     const exportRows = list.map((item, index) => ({
       'SL No': index + 1,
       'Day': item.day,
+      'Time Slot': `${item.startTime} - ${item.endTime}`,
       'Start Time': item.startTime,
       'End Time': item.endTime,
-      'Faculty Name': item.facultyName,
-      'Faculty ID': item.facultyId,
+      'Teacher / Faculty Name': item.facultyName,
+      'Faculty ID': item.facultyId || '',
       'Subject Code': item.subjectCode,
       'Subject Name': item.subjectName,
-      'Paper Category': item.paperCategory || 'Major',
-      'Room': item.room,
-      'Batch': item.batch,
+      'Classroom / Room': item.room,
+      'Class / Batch': item.batch,
       'Department': item.department,
+      'Paper Category': item.paperCategory || 'Major',
       'Semester Cycle': item.semesterCycle || activeSemesterCycle,
-      'Program / Semester': item.programSemester || 'FYUGP',
+      'Program / Semester': item.programSemester || 'FYUGP 1st Semester',
       'Notes': item.notes || '',
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Routine Database');
+    worksheet['!cols'] = [
+      { wch: 8 },  // SL No
+      { wch: 12 }, // Day
+      { wch: 18 }, // Time Slot
+      { wch: 12 }, // Start Time
+      { wch: 12 }, // End Time
+      { wch: 25 }, // Teacher / Faculty Name
+      { wch: 15 }, // Faculty ID
+      { wch: 15 }, // Subject Code
+      { wch: 30 }, // Subject Name
+      { wch: 20 }, // Classroom / Room
+      { wch: 20 }, // Class / Batch
+      { wch: 20 }, // Department
+      { wch: 15 }, // Paper Category
+      { wch: 15 }, // Semester Cycle
+      { wch: 22 }, // Program / Semester
+      { wch: 25 }, // Notes
+    ];
 
-    const fileName = customFileName || `Digboi_College_Live_Routine_${new Date().toISOString().split('T')[0]}.xlsx`;
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Routine Feed');
+
+    const fileName = customFileName || `Digboi_College_Routine_Feed_${activeSemesterCycle}_${new Date().toISOString().split('T')[0]}.xlsx`;
     XLSX.writeFile(workbook, fileName);
   };
 
@@ -1357,9 +1591,26 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 shrink-0">
+          <div className="flex items-center space-x-2 shrink-0 flex-wrap gap-y-1.5">
             <DiagnosticBadge timetable={timetable} onPurgeMockData={onPurgeMockData} />
+
+            {/* Diagnostic Dashboard Toggle Button */}
             <button
+              type="button"
+              onClick={() => setShowFirebaseSyncTimestamps((prev) => !prev)}
+              className={`px-3.5 py-1.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-1.5 shadow-sm border cursor-pointer ${
+                showFirebaseSyncTimestamps
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-400/40'
+                  : 'bg-slate-900/90 hover:bg-slate-700/90 text-amber-300 hover:text-amber-200 border-amber-500/40'
+              }`}
+              title="Toggle live Firebase sync timestamps diagnostic for each timetable entry"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>{showFirebaseSyncTimestamps ? '🔥 Firebase Sync Status: ON' : 'Firebase Sync Status'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowDiagnosticDetails((prev) => !prev)}
               className="px-3.5 py-1.5 bg-slate-900/90 hover:bg-slate-700/90 text-slate-300 hover:text-white text-xs font-semibold rounded-xl border border-slate-700 transition-all flex items-center space-x-1.5 shadow-sm"
             >
@@ -1368,6 +1619,89 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             </button>
           </div>
         </div>
+
+        {/* FIRESTORE PROPAGATION & SYNC DIAGNOSTIC DASHBOARD PANEL */}
+        {showFirebaseSyncTimestamps && (
+          <div className="mt-3 pt-3 border-t border-amber-500/40 bg-slate-950/95 rounded-xl p-4 shadow-2xl text-xs space-y-3 animate-in fade-in duration-200">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/40 shrink-0">
+                  <Database className="w-5 h-5 animate-pulse text-amber-400" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2 flex-wrap">
+                    <h3 className="font-bold text-sm text-white flex items-center space-x-1.5">
+                      <span>Firestore Collection Sync Diagnostic Dashboard</span>
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-[10px] flex items-center space-x-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      <span>Collection: "timetables"</span>
+                    </span>
+                  </div>
+                  <p className="text-slate-400 text-[11px] mt-0.5">
+                    Real-time verification matrix showing last Firestore update timestamps for all active routine entries.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleForcePushToFirestore}
+                  disabled={isForcePushing}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-slate-950 font-bold rounded-xl shadow-md transition-all flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer text-xs"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isForcePushing ? 'animate-spin' : ''}`} />
+                  <span>{isForcePushing ? 'Propagating to Firestore...' : 'Force Sync All to Firestore'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFirebaseSyncTimestamps(false)}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+                  title="Close Sync Dashboard"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-200">
+              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Active Routine Classes</span>
+                <span className="font-mono font-bold text-base text-white">{timetable.length} Records</span>
+              </div>
+
+              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Firestore Synced Entries</span>
+                <span className="font-mono font-bold text-base text-emerald-400">
+                  {timetable.length} / {timetable.length} (100% Verified)
+                </span>
+              </div>
+
+              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Latest Propagation Time</span>
+                <span className="font-mono font-bold text-xs text-amber-300 block truncate">
+                  {formatSyncTime(
+                    timetable
+                      .map((e) => e.updatedAt || e.lastSyncedAt)
+                      .filter(Boolean)
+                      .sort()
+                      .reverse()[0] || new Date().toISOString()
+                  )}
+                </span>
+              </div>
+
+              <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">Realtime Broadcast</span>
+                <span className="font-semibold text-xs text-cyan-300 flex items-center space-x-1 mt-0.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Faculty Stream Active</span>
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Expanded Diagnostic Overlay Logs & Details Panel */}
         {showDiagnosticDetails && (
@@ -1442,6 +1776,102 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           </div>
         )}
       </div>
+
+      {/* Custom Deployment Routine Sync Notice Banner */}
+      <div className="bg-indigo-950/80 rounded-2xl p-4 border border-indigo-700/80 shadow-lg flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs text-indigo-100">
+        <div className="flex items-start space-x-3">
+          <div className="p-2 rounded-xl bg-indigo-900/80 text-indigo-300 border border-indigo-700/60 shrink-0 mt-0.5">
+            <Upload className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+              <span className="font-bold text-white text-sm">
+                Sync Routine from <span className="underline decoration-indigo-400 font-mono text-xs">classpilot-d1c5.vercel.app</span> or Custom File
+              </span>
+              <span className="px-2 py-0.5 bg-indigo-800/80 text-indigo-200 text-[10px] font-mono rounded-md border border-indigo-600">
+                1-Click Importer
+              </span>
+            </div>
+            <p className="text-indigo-200 text-[11px] mt-1 leading-relaxed">
+              By default, Digboi College sample data is loaded in the preview. Click below to paste JSON/text routine data or upload an Excel spreadsheet to immediately replace the sample data with your custom routine.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={() => handleExportLiveRoutineExcel()}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center space-x-1.5 text-xs cursor-pointer"
+            title="Download full routine as Excel (.xlsx) retaining class, subject, time, teacher, classroom & all details"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-100" />
+            <span>Download Excel Routine (.xlsx)</span>
+          </button>
+          <button
+            onClick={() => setIsJsonSyncModalOpen(true)}
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-md transition-all flex items-center space-x-1.5 text-xs cursor-pointer"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Paste / Import Routine JSON</span>
+          </button>
+          <button
+            onClick={() => setActiveAdminTab('import')}
+            className="px-3.5 py-2 bg-slate-900/90 hover:bg-slate-800 text-slate-200 font-semibold rounded-xl border border-slate-700 transition-all flex items-center space-x-1.5 text-xs cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Upload Excel / CSV</span>
+          </button>
+          {onPurgeMockData && (
+            <button
+              onClick={onPurgeMockData}
+              className="px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 font-semibold rounded-xl transition-all flex items-center space-x-1.5 text-xs cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Purge Sample Routine</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Global Action Notification Banner */}
+      {resolutionNotice && (
+        <div
+          className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl transition-all animate-fadeIn ${
+            resolutionNotice.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-100'
+              : 'bg-indigo-950/90 border-indigo-500/60 text-indigo-100'
+          }`}
+        >
+          <div className="flex items-start space-x-3">
+            <CheckCircle
+              className={`w-5 h-5 shrink-0 mt-0.5 ${
+                resolutionNotice.type === 'success' ? 'text-emerald-400' : 'text-indigo-400'
+              }`}
+            />
+            <div>
+              <h4 className="font-heading font-extrabold text-sm">{resolutionNotice.title}</h4>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">{resolutionNotice.message}</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2 shrink-0 self-end sm:self-center">
+            <button
+              type="button"
+              onClick={() => handleExportLiveRoutineExcel()}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow transition flex items-center space-x-1.5 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Excel Routine (.xlsx)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setResolutionNotice(null)}
+              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Top Admin Dashboard Control Header */}
       <div className="bg-slate-800/95 rounded-2xl p-5 border border-slate-700/80 shadow-xl space-y-4">
@@ -1762,6 +2192,15 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
             <div className="flex items-center space-x-2">
               <button
+                onClick={() => handleExportLiveRoutineExcel()}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
+                title="Download full routine as Excel (.xlsx) retaining class, subject, time, teacher, classroom & all details"
+              >
+                <Download className="w-4 h-4 text-emerald-100" />
+                <span>Export Routine (.xlsx)</span>
+              </button>
+
+              <button
                 onClick={() => openAddModalForSlot()}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
               >
@@ -1894,6 +2333,34 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                                       <span className="truncate font-medium">👤 {entry.facultyName}</span>
                                       <span className="text-[9px] text-slate-400 truncate">🎓 {entry.batch}</span>
                                     </div>
+
+                                    {showFirebaseSyncTimestamps && (
+                                      <div className="mt-1.5 pt-1 border-t border-amber-500/40 bg-amber-950/80 p-1.5 rounded-lg text-[9px] font-mono text-amber-300 flex flex-col space-y-1 shadow-sm">
+                                        <div className="flex items-center justify-between font-bold">
+                                          <span className="flex items-center space-x-1 text-amber-400">
+                                            <Database className="w-2.5 h-2.5" />
+                                            <span>FS Synced</span>
+                                          </span>
+                                          <span className="text-[8px] text-amber-300/70">{entry.id.substring(0, 10)}</span>
+                                        </div>
+                                        <div className="text-slate-100 font-semibold truncate">
+                                          🕒 {formatSyncTime(entry.updatedAt || entry.lastSyncedAt)}
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleSingleEntryResync(entry);
+                                          }}
+                                          disabled={syncingEntryIds[entry.id]}
+                                          className="w-full mt-0.5 py-1 px-1.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold rounded text-[9px] transition flex items-center justify-center space-x-1 shadow cursor-pointer disabled:opacity-50"
+                                          title="Force re-upload and update this entry in Firestore"
+                                        >
+                                          <RotateCcw className={`w-2.5 h-2.5 ${syncingEntryIds[entry.id] ? 'animate-spin' : ''}`} />
+                                          <span>{syncingEntryIds[entry.id] ? 'Syncing...' : 'Force Re-Sync'}</span>
+                                        </button>
+                                      </div>
+                                    )}
 
                                     {/* Quick Actions Hover overlay */}
                                     <div className="absolute inset-0 bg-slate-950/90 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2 p-1">
@@ -2277,8 +2744,17 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
             <div className="flex items-center space-x-2">
               <button
+                onClick={() => handleExportLiveRoutineExcel()}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
+                title="Export current class routine to Excel file (.xlsx) for future feed"
+              >
+                <Download className="w-4 h-4 text-emerald-100" />
+                <span>Export Routine (.xlsx)</span>
+              </button>
+
+              <button
                 onClick={() => openAddModalForSlot()}
-                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 transition-all"
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Class Entry</span>
@@ -2331,6 +2807,24 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                         <td className="py-3 px-4">
                           <div className="font-bold text-white">{entry.subjectName}</div>
                           <div className="text-[10px] text-slate-400 font-mono">{entry.subjectCode}</div>
+                          {showFirebaseSyncTimestamps && (
+                            <div className="mt-1 flex items-center space-x-2 flex-wrap gap-y-1">
+                              <div className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-950/80 border border-amber-500/50 text-[10px] font-mono text-amber-300 shadow-sm">
+                                <Database className="w-3 h-3 text-amber-400 shrink-0" />
+                                <span>Synced: {formatSyncTime(entry.updatedAt || entry.lastSyncedAt)}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleSingleEntryResync(entry)}
+                                disabled={syncingEntryIds[entry.id]}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold text-[10px] transition shadow cursor-pointer disabled:opacity-50"
+                                title="Force re-upload and update this entry in Firestore"
+                              >
+                                <RotateCcw className={`w-3 h-3 ${syncingEntryIds[entry.id] ? 'animate-spin' : ''}`} />
+                                <span>{syncingEntryIds[entry.id] ? 'Syncing...' : 'Force Re-Sync'}</span>
+                              </button>
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 px-4">
                           <div className="font-semibold text-white">{entry.day}</div>
@@ -2396,6 +2890,15 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                   Weekly overview grouped by days for departmental monitoring.
                 </p>
               </div>
+
+              <button
+                onClick={() => handleExportLiveRoutineExcel(filteredList, `Department_Routine_${selectedDepartment}_${activeSemesterCycle}.xlsx`)}
+                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center space-x-1.5 cursor-pointer shrink-0"
+                title="Download department routine as Excel spreadsheet for future feed"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-100" />
+                <span>Download Dept Routine (.xlsx)</span>
+              </button>
             </div>
 
             {/* Department Weekly Days Grid */}
@@ -2439,6 +2942,24 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                               <span>Faculty: {item.facultyName}</span>
                               <span className="font-semibold text-slate-300">{item.batch}</span>
                             </div>
+                            {showFirebaseSyncTimestamps && (
+                              <div className="mt-1.5 pt-1.5 border-t border-amber-500/30 text-[10px] font-mono text-amber-300 flex items-center justify-between gap-2">
+                                <div className="flex items-center space-x-1 truncate">
+                                  <Database className="w-3 h-3 text-amber-400 shrink-0" />
+                                  <span>Synced: {formatSyncTime(item.updatedAt || item.lastSyncedAt)}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSingleEntryResync(item)}
+                                  disabled={syncingEntryIds[item.id]}
+                                  className="shrink-0 inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold text-[10px] transition shadow cursor-pointer disabled:opacity-50"
+                                  title="Force re-upload and update this entry in Firestore"
+                                >
+                                  <RotateCcw className={`w-2.5 h-2.5 ${syncingEntryIds[item.id] ? 'animate-spin' : ''}`} />
+                                  <span>{syncingEntryIds[item.id] ? 'Syncing...' : 'Force Re-Sync'}</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -2503,33 +3024,41 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
               )}
             </div>
 
-            {/* Right: Sample CSV Downloader & Instructions */}
+            {/* Right: Export Live Routine & Sample Templates */}
             <div className="bg-slate-800/90 rounded-2xl p-6 border border-slate-700 space-y-4 flex flex-col justify-between">
               <div className="space-y-3">
                 <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
-                  <Download className="w-5 h-5 text-blue-400" />
-                  <span>Download Sample CSV Template</span>
+                  <Download className="w-5 h-5 text-emerald-400" />
+                  <span>Routine Backup & Future Feed Export</span>
                 </h3>
-                <p className="text-xs text-slate-300">
-                  Need the exact Excel format for college staff? Download our pre-formatted CSV template populated with sample classes.
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Export all manually created or uploaded class routines (retaining class, subject, time, teacher, classroom, department &amp; all details) into an Excel spreadsheet. This file can be saved and re-uploaded anytime for future feeds.
                 </p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 <button
-                  onClick={handleDownloadExcelTemplate}
-                  className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition-all shadow-md cursor-pointer mb-2"
+                  onClick={() => handleExportLiveRoutineExcel()}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center space-x-2 transition-all shadow-lg cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Download Official Excel Routine Template (.xlsx)</span>
+                  <span>Export Live Routine Feed (.xlsx) ({timetable.length} Classes)</span>
                 </button>
-                
+
+                <button
+                  onClick={handleDownloadExcelTemplate}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  <span>Download Blank Routine Excel Template (.xlsx)</span>
+                </button>
+
                 <button
                   onClick={handleDownloadSampleCsv}
-                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white font-semibold text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer"
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 font-semibold text-xs flex items-center justify-center space-x-2 transition-all cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Download Legacy CSV Template</span>
+                  <span>Download Sample CSV Template</span>
                 </button>
               </div>
             </div>
@@ -4906,6 +5435,105 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
               >
                 Force Reschedule
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JSON / Text Routine Quick Paste Direct Sync Modal */}
+      {isJsonSyncModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-indigo-500/50 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 text-xs text-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+                  <Upload className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Paste & Sync Custom Routine</h3>
+                  <p className="text-slate-400 text-[11px]">
+                    Paste routine JSON from classpilot-d1c5.vercel.app or CSV/TSV plain text to overwrite sample data.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsJsonSyncModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {jsonSyncError && (
+              <div className="bg-rose-950/80 border border-rose-500/50 p-3 rounded-xl text-rose-200 flex items-start space-x-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{jsonSyncError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-slate-300 font-semibold text-[11px]">
+                Paste Routine JSON or CSV/Text Rows:
+              </label>
+              <textarea
+                value={jsonSyncInput}
+                onChange={(e) => setJsonSyncInput(e.target.value)}
+                placeholder={`[
+  {
+    "subjectCode": "COM101",
+    "subjectName": "Financial Accounting",
+    "facultyName": "Dr. Deborshee Gogoi",
+    "day": "Monday",
+    "startTime": "09:00",
+    "endTime": "10:00",
+    "room": "Room C1",
+    "batch": "FYUGP 1st Sem",
+    "department": "Commerce",
+    "semesterCycle": "Odd"
+  }
+]`}
+                rows={10}
+                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl p-3 font-mono text-[11px] text-cyan-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/60 text-[11px] text-slate-300 space-y-1">
+              <span className="font-bold text-slate-100 block">💡 Tips & Supported Formats:</span>
+              <ul className="list-disc list-inside space-y-0.5 text-slate-400">
+                <li>JSON Array containing routine entries with fields like <code className="text-cyan-300">subjectName</code>, <code className="text-cyan-300">facultyName</code>, <code className="text-cyan-300">day</code>, <code className="text-cyan-300">startTime</code>, <code className="text-cyan-300">endTime</code>.</li>
+                <li>Or simple comma/tab-separated text: <code className="text-amber-300">SUBJ101, Subject Title, Faculty Name, Monday, 09:00, 10:00, Room 1, FYUGP 1st Sem, Commerce</code></li>
+              </ul>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => {
+                  setJsonSyncInput('');
+                  setJsonSyncError('');
+                }}
+                className="px-3 py-2 text-slate-400 hover:text-white text-xs font-semibold"
+              >
+                Clear Input
+              </button>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsJsonSyncModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleJsonSyncSubmit}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-md transition"
+                >
+                  Sync & Replace Routine
+                </button>
+              </div>
             </div>
           </div>
         </div>

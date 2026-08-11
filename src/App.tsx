@@ -637,12 +637,14 @@ export default function App() {
 
     let modified = false;
     const reconciled = timetable.map((entry) => {
-      // If entry already matches a valid facultyId in facultyList, keep it
-      if (facultyList.some((f) => f.id === entry.facultyId)) return entry;
+      // Find matching registered faculty profile in facultyList using enhanced isFacultyNameMatch
+      const matched = facultyList.find(
+        (f) =>
+          isFacultyNameMatch(f.name, entry.facultyName) ||
+          (f.email && entry.facultyName && f.email.toLowerCase().startsWith(entry.facultyName.toLowerCase()))
+      );
 
-      // Try matching entry.facultyName against facultyList
-      const matched = facultyList.find((f) => isFacultyNameMatch(f.name, entry.facultyName));
-      if (matched) {
+      if (matched && (entry.facultyId !== matched.id || entry.facultyName !== matched.name)) {
         modified = true;
         return {
           ...entry,
@@ -658,6 +660,7 @@ export default function App() {
       try {
         localStorage.setItem('classpilot_timetable', JSON.stringify(reconciled));
       } catch (e) {}
+      saveTimetableToFirestore(reconciled, false).catch(() => {});
     }
   }, [facultyList, timetable]);
 

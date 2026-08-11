@@ -263,22 +263,48 @@ export function isFacultyNameMatch(name1: string = '', name2: string = ''): bool
   const s2 = norm2.replace(/\s+/g, '');
   if (s1 === s2) return true;
 
-  // Substring check for names with at least 4 chars
+  // 1. Direct Substring Check for non-trivial strings (e.g. "Deborshee Gogoi" in "Dr. Deborshee Gogoi")
   if (s1.length >= 4 && s2.length >= 4 && (s1.includes(s2) || s2.includes(s1))) return true;
 
-  // Token-based matching (e.g. "S. Boruah" vs "Sampreeti Boruah")
   const tokens1 = norm1.split(/\s+/).filter(Boolean);
   const tokens2 = norm2.split(/\s+/).filter(Boolean);
 
-  if (tokens1.length > 0 && tokens2.length > 0) {
-    const surname1 = tokens1[tokens1.length - 1];
-    const surname2 = tokens2[tokens2.length - 1];
-    if (surname1 === surname2 && surname1.length >= 3) {
-      const first1 = tokens1[0];
-      const first2 = tokens2[0];
-      if (first1 === first2 || first1.startsWith(first2[0]) || first2.startsWith(first1[0])) {
-        return true;
-      }
+  if (tokens1.length === 0 || tokens2.length === 0) return false;
+
+  // 2. Acronym / Initials Matching (e.g. "DG" vs "Deborshee Gogoi", "AD" vs "Anupam Dutta", "RS" vs "Rashmi Sarmah")
+  const acronym1 = tokens1.map((t) => t[0]).join('');
+  const acronym2 = tokens2.map((t) => t[0]).join('');
+
+  if (s1.length >= 2 && s1.length <= 4 && s1 === acronym2) return true;
+  if (s2.length >= 2 && s2.length <= 4 && s2 === acronym1) return true;
+
+  // 3. Surname Match + First Name Initial
+  // e.g. "D. Gogoi" vs "Deborshee Gogoi", "S. Boruah" vs "Sampreeti Boruah", "P.K. Borthakur" vs "Pradip Kumar Borthakur"
+  const surname1 = tokens1[tokens1.length - 1];
+  const surname2 = tokens2[tokens2.length - 1];
+
+  if (surname1 === surname2 && surname1.length >= 3) {
+    const first1 = tokens1[0];
+    const first2 = tokens2[0];
+    if (
+      first1 === first2 ||
+      first1.startsWith(first2[0]) ||
+      first2.startsWith(first1[0]) ||
+      (tokens1.length > 1 && tokens2.length > 1 && tokens1[1] === tokens2[1])
+    ) {
+      return true;
+    }
+  }
+
+  // 4. First Name Match + Surname Initial (e.g. "Deborshee G" vs "Deborshee Gogoi")
+  const firstName1 = tokens1[0];
+  const firstName2 = tokens2[0];
+  if (firstName1 === firstName2 && firstName1.length >= 4) {
+    if (tokens1.length === 1 || tokens2.length === 1) return true;
+    const second1 = tokens1[1];
+    const second2 = tokens2[1];
+    if (second1 && second2 && (second1[0] === second2[0] || second1 === second2)) {
+      return true;
     }
   }
 
