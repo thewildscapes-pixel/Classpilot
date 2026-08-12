@@ -55,7 +55,7 @@
   },
   {
     "id": "tt_1786458886130_17_0hv3",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "SAAD 2",
     "subjectName": "SAAD 2",
@@ -126,26 +126,8 @@
     "isSubstitute": 0
   },
   {
-    "id": "test_imp_1",
-    "facultyId": "fac_1",
-    "facultyName": "Dr. Test",
-    "subjectCode": "TEST101",
-    "subjectName": "Test Course",
-    "room": "Room C1",
-    "day": "Monday",
-    "startTime": "08:00",
-    "endTime": "09:00",
-    "batch": "FYUGP 1st Sem",
-    "department": "Computer Science",
-    "semesterCycle": "",
-    "programSemester": "",
-    "paperCategory": "",
-    "notes": "",
-    "isSubstitute": 0
-  },
-  {
     "id": "tt_1786458886129_9_4yfb",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "SAAD 2",
     "subjectName": "SAAD 2",
@@ -199,7 +181,7 @@
   },
   {
     "id": "tt_1786458886129_1_glk7",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "BST 1",
     "subjectName": "BST 1",
@@ -217,7 +199,7 @@
   },
   {
     "id": "tt_1786458886129_5_jzsm",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "SAAD 1",
     "subjectName": "SAAD 1",
@@ -253,7 +235,7 @@
   },
   {
     "id": "tt_1786458886130_18_w88c",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "MDC 101",
     "subjectName": "MDC 101",
@@ -289,7 +271,7 @@
   },
   {
     "id": "tt_1786458886130_24_3tba",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "MIN-MKT-101",
     "subjectName": "MIN-MKT-101",
@@ -415,7 +397,7 @@
   },
   {
     "id": "tt_1786458886130_35_j141",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "POM",
     "subjectName": "POM",
@@ -487,7 +469,7 @@
   },
   {
     "id": "tt_1786458886129_3_jjuz",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "SAAD",
     "subjectName": "SAAD",
@@ -505,7 +487,7 @@
   },
   {
     "id": "tt_1786458886130_29_od19",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "MDC 101",
     "subjectName": "MDC 101",
@@ -577,7 +559,7 @@
   },
   {
     "id": "tt_1786458886130_31_2paw",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "SEC 301",
     "subjectName": "SEC 301",
@@ -595,7 +577,7 @@
   },
   {
     "id": "tt_1786458886128_0_rcly",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "SAAD",
     "subjectName": "SAAD",
@@ -667,7 +649,7 @@
   },
   {
     "id": "tt_1786458886129_13_v0ux",
-    "facultyId": "fac_1786458488299_1",
+    "facultyId": "fac_auto_1786534700017_0_uryb",
     "facultyName": "Dr. Subhadeep Chakraborty",
     "subjectCode": "BST 2",
     "subjectName": "BST 2",

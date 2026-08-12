@@ -162,9 +162,19 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const cleaned = parsed.filter(
-            (f: Faculty) => f.name !== 'Dr. Jitu Borah' && f.name !== 'Prof. Rashmi Saikia' && f.name !== 'Dr. Deborshee Gogoi' && f.id !== 'fac_1' && f.id !== 'fac_2' && f.id !== 'fac_3'
-          );
+          const cleaned = parsed.filter((f: Faculty) => {
+            if (!f || !f.name) return false;
+            const lower = f.name.toLowerCase().trim();
+            return (
+              !lower.includes('test') &&
+              lower !== 'faculty member' &&
+              lower !== 'dr. faculty member' &&
+              lower !== 'dr faculty member' &&
+              f.id !== 'fac_1' &&
+              f.id !== 'fac_2' &&
+              f.id !== 'fac_3'
+            );
+          });
           return cleaned;
         }
       }

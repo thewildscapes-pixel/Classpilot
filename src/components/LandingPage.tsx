@@ -365,7 +365,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <input
                       type="email"
                       required
-                      placeholder="e.g. deborsheegogoi@gmail.com"
+                      placeholder="e.g. abcd@gmail.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs"
@@ -381,7 +381,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <input
                       type="tel"
                       required
-                      placeholder="e.g. 9706375001"
+                      placeholder="e.g. 9912345678"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs"

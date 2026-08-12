@@ -125,11 +125,41 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
 
   // Combine registered facultyList with unique faculty profiles present in imported timetable
   const allAvailableFacultyList = useMemo(() => {
-    const list: Faculty[] = [...facultyList];
+    // Filter out test and placeholder entries
+    const isTestOrPlaceholder = (name: string = '') => {
+      const clean = name.trim().toLowerCase();
+      return (
+        clean.includes('test') ||
+        clean === 'faculty member' ||
+        clean === 'dr. faculty member' ||
+        clean === 'dr faculty member' ||
+        clean === 'unassigned'
+      );
+    };
+
+    const list: Faculty[] = facultyList.filter((f) => !isTestOrPlaceholder(f.name));
     const existingKeys = new Set(list.map((f) => f.name.toLowerCase().replace(/[^a-z0-9]/g, '')));
 
+    // Ensure logged in currentUser is automatically included in available faculty list
+    if (currentUser && currentUser.name && !isTestOrPlaceholder(currentUser.name)) {
+      const userKey = currentUser.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (userKey && !existingKeys.has(userKey)) {
+        existingKeys.add(userKey);
+        list.unshift({
+          id: currentUser.facultyId || currentUser.id || `fac_${userKey}`,
+          name: currentUser.name,
+          email: currentUser.email || '',
+          department: currentUser.department || 'Commerce',
+          designation: 'Faculty Member',
+          phone: currentUser.phone || currentUser.whatsappPhone || '',
+          whatsappPhone: currentUser.phone || currentUser.whatsappPhone || '',
+          isVerified: true,
+        });
+      }
+    }
+
     timetable.forEach((entry) => {
-      if (!entry.facultyName || entry.facultyName === 'Unassigned' || entry.facultyName === 'Faculty Member') return;
+      if (!entry.facultyName || isTestOrPlaceholder(entry.facultyName)) return;
       const key = entry.facultyName.toLowerCase().replace(/[^a-z0-9]/g, '');
       if (key && !existingKeys.has(key)) {
         existingKeys.add(key);
@@ -147,21 +177,19 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     });
 
     return list;
-  }, [facultyList, timetable]);
+  }, [facultyList, timetable, currentUser]);
 
   // Determine current active faculty object
   const currentFaculty: Faculty =
+    (currentUser &&
+      allAvailableFacultyList.find(
+        (f) =>
+          (currentUser.facultyId && f.id === currentUser.facultyId) ||
+          (f.email && currentUser.email && f.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
+          isFacultyNameMatch(f.name, currentUser.name)
+      )) ||
     allAvailableFacultyList.find((f) => f.id === selectedFacultyId) ||
     allAvailableFacultyList.find((f) => isFacultyNameMatch(f.name, selectedFacultyId)) ||
-    allAvailableFacultyList.find(
-      (f) =>
-        currentUser &&
-        (f.id === currentUser.facultyId ||
-          (f.email && currentUser.email && f.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
-          isPhoneMatch(f.phone, currentUser.phone) ||
-          isPhoneMatch(f.whatsappPhone, currentUser.phone) ||
-          isFacultyNameMatch(f.name, currentUser.name))
-    ) ||
     (currentUser
       ? {
           id: currentUser.facultyId || currentUser.id || 'fac_user',
@@ -241,23 +269,28 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     })
     .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
 
-  // --- HIGHLIGHT CURRENT / NEXT CLASS ENGINE ---
+  // --- HIGHLIGHT CURRENT / NEXT CLASS ENGINE (ONLY ACTIVE ON ACTUAL TODAY) ---
+  const isActualToday = !jumpDate && normalizeDay(selectedDay) === normalizeDay(getCurrentDayName(currentDate));
   const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes();
-  const todayEntriesSorted = [...allFacultyEntries]
-    .filter((e) => normalizeDay(e.day) === targetDayNorm)
-    .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
+  const todayEntriesSorted = isActualToday
+    ? [...allFacultyEntries]
+        .filter((e) => normalizeDay(e.day) === targetDayNorm)
+        .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime))
+    : [];
 
-  const ongoingClass = todayEntriesSorted.find((e) => {
-    const start = parseTimeToMinutes(e.startTime);
-    const end = parseTimeToMinutes(e.endTime);
-    return currentMin >= start && currentMin < end;
-  });
+  const ongoingClass = isActualToday
+    ? todayEntriesSorted.find((e) => {
+        const start = parseTimeToMinutes(e.startTime);
+        const end = parseTimeToMinutes(e.endTime);
+        return currentMin >= start && currentMin < end;
+      })
+    : null;
 
-  const nextClass = !ongoingClass
+  const nextClass = isActualToday && !ongoingClass
     ? todayEntriesSorted.find((e) => parseTimeToMinutes(e.startTime) > currentMin)
     : null;
 
-  const highlightClass = ongoingClass || nextClass || todayEntriesSorted[0] || null;
+  const highlightClass = isActualToday ? (ongoingClass || nextClass || todayEntriesSorted[0] || null) : null;
   const isOngoing = Boolean(ongoingClass);
 
   // --- FREE PERIOD GAPS COMPUTATION ---
@@ -552,6 +585,53 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
       {/* VIEW MODE 1: DAILY VIEW */}
       {viewMode === 'daily' && (
         <div className="space-y-5">
+          {/* Calendar Jump Date Banner */}
+          {jumpDate ? (
+            <div className="bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-slate-900 border-2 border-blue-400/50 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-md">
+                  <Calendar className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <div className="text-[11px] text-blue-200 font-extrabold uppercase tracking-wider">
+                    Scheduled Routine for Selected Calendar Date
+                  </div>
+                  <div className="text-base sm:text-lg font-extrabold text-white">
+                    {new Date(jumpDate + 'T00:00:00').toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric',
+                    })}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setJumpDate('');
+                  onSelectDay(getCurrentDayName(currentDate));
+                }}
+                className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer shadow-md"
+              >
+                <span>Return to Today's Live Schedule</span>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ) : !isActualToday ? (
+            <div className="bg-slate-900/90 border border-slate-700/80 rounded-2xl p-3.5 text-slate-300 flex items-center justify-between shadow-md">
+              <div className="flex items-center space-x-2 text-xs font-semibold">
+                <Calendar className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>Showing scheduled routine for <strong className="text-white">{selectedDay}</strong> ({dayEntries.length} Classes)</span>
+              </div>
+              <button
+                onClick={() => onSelectDay(getCurrentDayName(currentDate))}
+                className="text-xs font-bold text-blue-400 hover:text-blue-300 underline cursor-pointer"
+              >
+                Jump to Today ({getCurrentDayName(currentDate)})
+              </button>
+            </div>
+          ) : null}
+
           {/* PROMINENT HIGHLIGHT HERO BANNER: CURRENT / NEXT CLASS */}
           {highlightClass && (
             <div

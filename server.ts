@@ -286,8 +286,8 @@ async function initDatabase() {
 
   // Clean database cleanup: Remove legacy mock/dummy seed entries if present
   try {
-    runSql("DELETE FROM timetable WHERE id LIKE 'tt_dg_%' OR id LIKE 'tt_jb_%' OR id LIKE 'tt_rs_%'");
-    runSql("DELETE FROM faculty WHERE id IN ('fac_1', 'fac_2', 'fac_3') AND name IN ('Dr. Deborshee Gogoi', 'Dr. Jitu Borah', 'Prof. Rashmi Saikia')");
+    runSql("DELETE FROM timetable WHERE id LIKE 'tt_dg_%' OR id LIKE 'tt_jb_%' OR id LIKE 'tt_rs_%' OR subjectName LIKE '%test%' OR subjectCode LIKE '%test%' OR facultyName LIKE '%test%' OR facultyName LIKE '%faculty member%' OR id LIKE 'test_%'");
+    runSql("DELETE FROM faculty WHERE id IN ('fac_1', 'fac_2', 'fac_3') OR name LIKE '%test%' OR name LIKE '%faculty member%'");
     runSql("DELETE FROM students WHERE id IN ('st_1', 'st_2', 'st_3', 'st_4', 'st_5', 'st_6', 'st_7', 'st_8') AND name IN ('Ananya Gogoi', 'Bishal Sonowal', 'Debashree Sharma', 'Hemanta Baruah', 'Jubin Saikia', 'Kavita Agarwal', 'Manash Protim Das', 'Nabanita Borgohain')");
     runSql("DELETE FROM rooms WHERE id IN ('rm_1', 'rm_2', 'rm_3', 'rm_4', 'rm_5') AND name LIKE 'Room No.%'");
   } catch (e) {
