@@ -55,6 +55,38 @@
         "batch": { "type": "string" }
       },
       "required": ["id", "facultyId", "day", "startTime", "endTime", "subject"]
+    },
+    "FacultySelfImportRecord": {
+      "title": "Faculty Self Import Record",
+      "description": "Faculty individual routine import records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "facultyId": { "type": "string" },
+        "facultyName": { "type": "string" },
+        "fileName": { "type": "string" },
+        "importedAt": { "type": "string" },
+        "entriesCount": { "type": "number" }
+      },
+      "required": ["id", "facultyName", "fileName", "importedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/timetables/{docId}": {
+      "schema": { "$ref": "#/entities/TimetableEntry" },
+      "description": "Master routine timetable entries"
+    },
+    "/classDiary/{entryId}": {
+      "schema": { "$ref": "#/entities/ClassDiaryEntry" },
+      "description": "Class diary records"
+    },
+    "/faculty_self_imports/{recordId}": {
+      "schema": { "$ref": "#/entities/FacultySelfImportRecord" },
+      "description": "Faculty self-imported routines"
     }
   }
 }

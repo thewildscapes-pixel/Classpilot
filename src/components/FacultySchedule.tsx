@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { TimetableEntry, Faculty, DayOfWeek, User, Student } from '../types';
+import { TimetableEntry, Faculty, DayOfWeek, User, Student, FacultySelfImportRecord } from '../types';
 import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName, isFacultyNameMatch, isPhoneMatch } from '../utils/timeUtils';
 import { ClassQrAttendanceModal } from './ClassQrAttendanceModal';
+import { FacultySelfImportModal } from './FacultySelfImportModal';
 import {
   Calendar,
   Clock,
@@ -24,6 +25,7 @@ import {
   X,
   UserCheck,
   QrCode,
+  Upload,
 } from 'lucide-react';
 
 interface FacultyScheduleProps {
@@ -38,6 +40,8 @@ interface FacultyScheduleProps {
   currentUser: User;
   onNavigateToDiary?: (entry: TimetableEntry) => void;
   students?: Student[];
+  onFacultySelfImportSuccess?: (entries: TimetableEntry[], record: FacultySelfImportRecord) => void;
+  existingSelfImportRecord?: FacultySelfImportRecord | null;
 }
 
 interface FreePeriodItem {
@@ -94,11 +98,14 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   currentUser,
   onNavigateToDiary,
   students = [],
+  onFacultySelfImportSuccess,
+  existingSelfImportRecord,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
   const [jumpDate, setJumpDate] = useState<string>('');
   const [qrModalEntry, setQrModalEntry] = useState<TimetableEntry | null>(null);
+  const [isSelfImportModalOpen, setIsSelfImportModalOpen] = useState<boolean>(false);
 
   // Normalize day helper for robust day comparison (e.g., 'Mon', 'MONDAY', 'Monday ')
   const normalizeDay = (d: string = ''): string => {
@@ -492,6 +499,16 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
             >
               <Printer className="w-4 h-4 text-blue-400" />
               <span className="hidden sm:inline">Export PDF</span>
+            </button>
+
+            {/* Self-Import Routine Button */}
+            <button
+              onClick={() => setIsSelfImportModalOpen(true)}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-600/30 flex items-center space-x-1.5 shrink-0 transition-all cursor-pointer"
+              title="Self-service import for your own routine file (Excel/CSV)"
+            >
+              <Upload className="w-4 h-4" />
+              <span>Import My Routine</span>
             </button>
           </div>
         </div>
@@ -1041,6 +1058,20 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
           onClose={() => setQrModalEntry(null)}
         />
       )}
+
+      {/* Faculty Self-Service Routine Import Modal */}
+      <FacultySelfImportModal
+        isOpen={isSelfImportModalOpen}
+        onClose={() => setIsSelfImportModalOpen(false)}
+        currentUser={currentUser}
+        currentFaculty={currentFaculty}
+        onImportSuccess={(entries, record) => {
+          if (onFacultySelfImportSuccess) {
+            onFacultySelfImportSuccess(entries, record);
+          }
+        }}
+        existingRecord={existingSelfImportRecord}
+      />
     </div>
   );
 };

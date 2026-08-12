@@ -92,6 +92,25 @@ export interface TimeState {
   isPaused: boolean;
 }
 
+export interface FacultySelfImportRecord {
+  id: string;
+  facultyId: string;
+  facultyName: string;
+  employeeId?: string;
+  phone?: string;
+  email?: string;
+  department?: string;
+  importedAt: string;
+  fileName: string;
+  entriesCount: number;
+  entries: TimetableEntry[];
+  importHistory?: {
+    importedAt: string;
+    fileName: string;
+    entriesCount: number;
+  }[];
+}
+
 export interface SavedFacultyProfile {
   id: string;
   name: string;

@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User, RoutineVersion, RoutineBackup } from '../types';
+import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, User, RoutineVersion, RoutineBackup, FacultySelfImportRecord } from '../types';
 import { AdminNaacReports } from './AdminNaacReports';
 import { AdminSqliteIntegrityView } from './AdminSqliteIntegrityView';
+import { AdminFacultySelfImportsView } from './AdminFacultySelfImportsView';
 import { DiagnosticBadge } from './DiagnosticBadge';
 import {
   DAYS_OF_WEEK,
@@ -87,6 +88,8 @@ interface AdminTimetableProps {
   onResetData: () => void;
   onPurgeMockData?: () => void;
   onToggleUserAdminRole?: (userEmail: string, makeAdmin: boolean) => void;
+  facultySelfImports?: FacultySelfImportRecord[];
+  onRefreshSelfImports?: () => void;
 }
 
 export const AdminTimetable: React.FC<AdminTimetableProps> = ({
@@ -112,10 +115,12 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   onResetData,
   onPurgeMockData,
   onToggleUserAdminRole,
+  facultySelfImports = [],
+  onRefreshSelfImports,
 }) => {
   // Navigation sub-tabs inside Admin
   const [activeAdminTab, setActiveAdminTab] = useState<
-    'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access' | 'backup_safeguards' | 'sqlite_integrity'
+    'grid' | 'timetable' | 'dept_routine' | 'naac_reports' | 'import' | 'conflicts' | 'roster' | 'students' | 'session' | 'access' | 'backup_safeguards' | 'sqlite_integrity' | 'faculty_self_imports'
   >('grid');
 
   // Diagnostic Data Source Overlay State
@@ -2037,6 +2042,23 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             >
               <Upload className="w-3.5 h-3.5" />
               <span>Excel/CSV Import</span>
+            </button>
+
+            <button
+              onClick={() => setActiveAdminTab('faculty_self_imports')}
+              className={`relative flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                activeAdminTab === 'faculty_self_imports'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-emerald-300 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Faculty Self-Imports</span>
+              {facultySelfImports.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-emerald-500 text-slate-950 text-[10px] font-extrabold rounded-full">
+                  {facultySelfImports.length}
+                </span>
+              )}
             </button>
 
             <button
@@ -5000,6 +5022,16 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         <AdminNaacReports
           facultyList={facultyList}
           timetable={timetable}
+        />
+      )}
+
+      {/* ===================== TAB: FACULTY SELF-IMPORTS & MASTER CROSS-CHECK ===================== */}
+      {activeAdminTab === 'faculty_self_imports' && (
+        <AdminFacultySelfImportsView
+          facultyList={facultyList}
+          masterTimetable={timetable}
+          selfImportRecords={facultySelfImports}
+          onRefreshSelfImports={onRefreshSelfImports}
         />
       )}
 

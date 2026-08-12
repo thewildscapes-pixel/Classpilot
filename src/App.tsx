@@ -11,6 +11,7 @@ import {
   RoutineVersion,
   RoutineBackup,
   RawRoutineFile,
+  FacultySelfImportRecord,
 } from './types';
 import {
   INITIAL_FACULTY,
@@ -52,6 +53,8 @@ import {
   subscribeToRoomsRealtime,
   saveRoomToFirestore,
   deleteRoomFromFirestore,
+  subscribeToFacultySelfImportsRealtime,
+  getFacultySelfImportsFromFirestore,
 } from './lib/firebaseService';
 
 // Components
@@ -426,6 +429,37 @@ export default function App() {
   // Safeguards: Versioning & Backups State
   const [routineVersions, setRoutineVersions] = useState<RoutineVersion[]>([]);
   const [routineBackups, setRoutineBackups] = useState<RoutineBackup[]>([]);
+
+  // Faculty Self-Import Records State
+  const [facultySelfImports, setFacultySelfImports] = useState<FacultySelfImportRecord[]>([]);
+
+  // Realtime subscription for Faculty Self-Imports
+  useEffect(() => {
+    const unsubscribe = subscribeToFacultySelfImportsRealtime((records) => {
+      console.log(`[App.tsx] Realtime listener received ${records.length} faculty self-import records.`);
+      setFacultySelfImports(records);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleFacultySelfImportSuccess = (entries: TimetableEntry[], record: FacultySelfImportRecord) => {
+    console.log(`[App.tsx] Faculty self-import success: ${entries.length} entries for ${record.facultyName}`);
+    setFacultySelfImports((prev) => {
+      const filtered = prev.filter((r) => r.id !== record.id && r.facultyId !== record.facultyId);
+      return [record, ...filtered];
+    });
+
+    setTimetable((prev) => {
+      const nonSelfEntries = prev.filter(
+        (e) => e.facultyId !== record.facultyId && !isFacultyNameMatch(e.facultyName, record.facultyName)
+      );
+      const updated = [...nonSelfEntries, ...entries];
+      try {
+        localStorage.setItem('classpilot_timetable', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
 
   // Central Database Sync Engine (Fetches directly from central server API)
   const syncCentralDatabase = useCallback(async () => {
@@ -1400,6 +1434,14 @@ export default function App() {
               setActiveTab('diary');
             }}
             students={students}
+            onFacultySelfImportSuccess={handleFacultySelfImportSuccess}
+            existingSelfImportRecord={
+              facultySelfImports.find(
+                (r) =>
+                  (r.facultyId && r.facultyId === currentUser?.facultyId) ||
+                  isFacultyNameMatch(r.facultyName, currentUser?.name || '')
+              ) || null
+            }
           />
         )}
 
@@ -1467,6 +1509,8 @@ export default function App() {
             onResetData={handleResetData}
             onPurgeMockData={handlePurgeMockDataAndKeepCustom}
             onToggleUserAdminRole={handleToggleUserAdminRole}
+            facultySelfImports={facultySelfImports}
+            onRefreshSelfImports={() => getFacultySelfImportsFromFirestore().then(setFacultySelfImports)}
           />
         )}
 

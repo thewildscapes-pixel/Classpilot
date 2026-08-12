@@ -55,6 +55,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Faculty Self-Import Records
+    match /faculty_self_imports/{recordId} {
+      allow read, write: if true;
+    }
+
     // Calendar Events
     match /calendarEvents/{eventId} {
       allow read: if isAuthenticated();

@@ -22,7 +22,7 @@ import {
   writeBatch,
   FirebaseUser,
 } from './firebase';
-import { User, TimetableEntry, ClassDiaryEntry, RoutineVersion, RoutineBackup, RawRoutineFile, Faculty, Room } from '../types';
+import { User, TimetableEntry, ClassDiaryEntry, RoutineVersion, RoutineBackup, RawRoutineFile, Faculty, Room, FacultySelfImportRecord } from '../types';
 
 // ==========================================
 // 1. AUTHENTICATION & FACULTY PROFILES
@@ -1083,3 +1083,129 @@ export async function saveClassDiaryToFirestore(entry: ClassDiaryEntry): Promise
     };
   }
 }
+
+// ==========================================
+// 8. FACULTY SELF-IMPORT ROUTINE FUNCTIONS
+// ==========================================
+
+/**
+ * Save faculty self-imported routine to Firestore collection `faculty_self_imports`
+ */
+export async function saveFacultySelfImportToFirestore(
+  record: FacultySelfImportRecord
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const docId = (record.facultyId || record.facultyName).toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const docRef = doc(db, 'faculty_self_imports', docId);
+
+    // Get existing doc if any to append import history
+    const existingSnap = await getDoc(docRef);
+    let history = record.importHistory || [];
+
+    if (existingSnap.exists()) {
+      const data = existingSnap.data();
+      const prevHistory = data.importHistory || [];
+      const currentSnapshot = {
+        importedAt: record.importedAt,
+        fileName: record.fileName,
+        entriesCount: record.entriesCount,
+      };
+      history = [currentSnapshot, ...prevHistory].slice(0, 10);
+    } else {
+      history = [
+        {
+          importedAt: record.importedAt,
+          fileName: record.fileName,
+          entriesCount: record.entriesCount,
+        },
+      ];
+    }
+
+    const payload = {
+      ...record,
+      id: docId,
+      importHistory: history,
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(docRef, payload, { merge: true });
+    console.log(`[saveFacultySelfImportToFirestore] Successfully saved self-import for ${record.facultyName} (${record.entriesCount} classes).`);
+    return { success: true };
+  } catch (err: any) {
+    console.error('[saveFacultySelfImportToFirestore] Error:', err);
+    return { success: false, error: err?.message || 'Failed to sync self-imported routine to central database.' };
+  }
+}
+
+/**
+ * Realtime listener for faculty self-imports (for Admin dashboard & Faculty view)
+ */
+export function subscribeToFacultySelfImportsRealtime(
+  callback: (records: FacultySelfImportRecord[]) => void
+) {
+  try {
+    const colRef = collection(db, 'faculty_self_imports');
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const records: FacultySelfImportRecord[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          records.push({
+            id: docSnap.id,
+            facultyId: data.facultyId || docSnap.id,
+            facultyName: data.facultyName || 'Faculty Member',
+            employeeId: data.employeeId || '',
+            phone: data.phone || '',
+            email: data.email || '',
+            department: data.department || '',
+            importedAt: data.importedAt || new Date().toISOString(),
+            fileName: data.fileName || 'Self_Import.csv',
+            entriesCount: data.entriesCount || (data.entries ? data.entries.length : 0),
+            entries: data.entries || [],
+            importHistory: data.importHistory || [],
+          });
+        });
+        callback(records);
+      },
+      (err) => {
+        console.warn('[subscribeToFacultySelfImportsRealtime] Firestore listener note:', err);
+      }
+    );
+  } catch (err) {
+    console.warn('[subscribeToFacultySelfImportsRealtime] Exception:', err);
+    return () => {};
+  }
+}
+
+/**
+ * Fetch all faculty self-imports once
+ */
+export async function getFacultySelfImportsFromFirestore(): Promise<FacultySelfImportRecord[]> {
+  try {
+    const snapshot = await getDocs(collection(db, 'faculty_self_imports'));
+    const records: FacultySelfImportRecord[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      records.push({
+        id: docSnap.id,
+        facultyId: data.facultyId || docSnap.id,
+        facultyName: data.facultyName || 'Faculty Member',
+        employeeId: data.employeeId || '',
+        phone: data.phone || '',
+        email: data.email || '',
+        department: data.department || '',
+        importedAt: data.importedAt || new Date().toISOString(),
+        fileName: data.fileName || 'Self_Import.csv',
+        entriesCount: data.entriesCount || (data.entries ? data.entries.length : 0),
+        entries: data.entries || [],
+        importHistory: data.importHistory || [],
+      });
+    });
+    return records;
+  } catch (err) {
+    console.warn('[getFacultySelfImportsFromFirestore] Error:', err);
+    return [];
+  }
+}
+
