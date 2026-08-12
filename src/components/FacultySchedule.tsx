@@ -27,6 +27,10 @@ import {
   UserCheck,
   QrCode,
   Upload,
+  Edit2,
+  Trash2,
+  Save,
+  Plus,
 } from 'lucide-react';
 
 interface FacultyScheduleProps {
@@ -43,6 +47,9 @@ interface FacultyScheduleProps {
   students?: Student[];
   onFacultySelfImportSuccess?: (entries: TimetableEntry[], record: FacultySelfImportRecord) => void;
   existingSelfImportRecord?: FacultySelfImportRecord | null;
+  onUpdateEntry?: (id: string, patch: Partial<TimetableEntry>) => void;
+  onDeleteEntry?: (id: string) => void;
+  onAddEntry?: (entry: Omit<TimetableEntry, 'id'>) => void;
 }
 
 interface FreePeriodItem {
@@ -101,6 +108,9 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   students = [],
   onFacultySelfImportSuccess,
   existingSelfImportRecord,
+  onUpdateEntry,
+  onDeleteEntry,
+  onAddEntry,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [viewMode, setViewMode] = useState<'daily' | 'weekly'>('daily');
@@ -109,6 +119,89 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const [isSelfImportModalOpen, setIsSelfImportModalOpen] = useState<boolean>(false);
   const [isQREnrollmentModalOpen, setIsQREnrollmentModalOpen] = useState<boolean>(false);
   const [qrEnrollmentClassBatch, setQrEnrollmentClassBatch] = useState<string>('FYUGP 1st Sem Commerce');
+
+  // Edit Class Routine Entry Modal State
+  const [editingEntry, setEditingEntry] = useState<TimetableEntry | null>(null);
+  const [editForm, setEditForm] = useState<{
+    subjectName: string;
+    subjectCode: string;
+    room: string;
+    startTime: string;
+    endTime: string;
+    day: DayOfWeek;
+    batch: string;
+    department: string;
+    paperCategory: string;
+    facultyName: string;
+    notes: string;
+    isSubstitute: boolean;
+  }>({
+    subjectName: '',
+    subjectCode: '',
+    room: '',
+    startTime: '09:00',
+    endTime: '10:00',
+    day: 'Monday',
+    batch: '',
+    department: 'Commerce',
+    paperCategory: 'Major',
+    facultyName: '',
+    notes: '',
+    isSubstitute: false,
+  });
+
+  const handleOpenEditModal = (entry: TimetableEntry) => {
+    setEditingEntry(entry);
+    setEditForm({
+      subjectName: entry.subjectName || '',
+      subjectCode: entry.subjectCode || '',
+      room: entry.room || '',
+      startTime: entry.startTime || '09:00',
+      endTime: entry.endTime || '10:00',
+      day: entry.day || 'Monday',
+      batch: entry.batch || '',
+      department: entry.department || 'Commerce',
+      paperCategory: entry.paperCategory || 'Major',
+      facultyName: entry.facultyName || 'Faculty Member',
+      notes: entry.notes || '',
+      isSubstitute: Boolean(entry.isSubstitute),
+    });
+  };
+
+  const handleSaveEditModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEntry) return;
+
+    const patch: Partial<TimetableEntry> = {
+      subjectName: editForm.subjectName.trim() || 'Untitled Lecture',
+      subjectCode: editForm.subjectCode.trim() || 'SUB-101',
+      room: editForm.room.trim() || 'Room C1',
+      startTime: editForm.startTime,
+      endTime: editForm.endTime,
+      day: editForm.day,
+      batch: editForm.batch.trim() || 'FYUGP',
+      department: editForm.department,
+      paperCategory: editForm.paperCategory,
+      facultyName: editForm.facultyName.trim() || 'Faculty Member',
+      notes: editForm.notes.trim(),
+      isSubstitute: editForm.isSubstitute,
+    };
+
+    if (onUpdateEntry) {
+      onUpdateEntry(editingEntry.id, patch);
+    }
+    setEditingEntry(null);
+  };
+
+  const handleDeleteEditModal = () => {
+    if (!editingEntry) return;
+    if (confirm(`Are you sure you want to delete class "${editingEntry.subjectName}" from the routine?`)) {
+      if (onDeleteEntry) {
+        onDeleteEntry(editingEntry.id);
+      }
+      setEditingEntry(null);
+    }
+  };
 
   // Normalize day helper for robust day comparison (e.g., 'Mon', 'MONDAY', 'Monday ')
   const normalizeDay = (d: string = ''): string => {
@@ -894,6 +987,15 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                       {/* Right Actions */}
                       <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-700/60">
                         <button
+                          onClick={() => handleOpenEditModal(entry)}
+                          className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/20 flex items-center space-x-1.5 transition-all cursor-pointer"
+                          title="Edit Class Routine Entry"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>Edit Class</span>
+                        </button>
+
+                        <button
                           onClick={() => setQrModalEntry(entry)}
                           className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-700 text-cyan-300 hover:text-white text-xs font-bold border border-slate-700/80 flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm"
                           title="Generate QR code for student live attendance scan"
@@ -1089,30 +1191,38 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                               <span className="font-extrabold text-indigo-200">{getEnrolledStudentCount(entry, students)} Students</span>
                             </div>
 
-                            {/* Direct Fill Class Diary, QR Code or Alert */}
+                            {/* Direct Fill Class Diary, QR Code, Edit or Alert */}
                             <div className="flex items-center space-x-1 pt-1">
                               <button
+                                onClick={() => handleOpenEditModal(entry)}
+                                className="flex-1 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded flex items-center justify-center space-x-1 transition-all cursor-pointer shadow-sm"
+                                title="Edit Class Routine Entry"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                                <span>Edit</span>
+                              </button>
+
+                              <button
                                 onClick={() => setQrModalEntry(entry)}
-                                className="flex-1 py-1 bg-slate-950 hover:bg-slate-800 text-cyan-300 text-[10px] font-bold rounded border border-slate-700/80 flex items-center justify-center space-x-1 transition-all cursor-pointer"
+                                className="py-1 px-1.5 bg-slate-950 hover:bg-slate-800 text-cyan-300 text-[10px] font-bold rounded border border-slate-700/80 flex items-center justify-center transition-all cursor-pointer"
                                 title="Generate QR Code"
                               >
                                 <QrCode className="w-3 h-3 text-cyan-400" />
-                                <span>QR</span>
                               </button>
 
                               {onNavigateToDiary && (
                                 <button
                                   onClick={() => onNavigateToDiary(entry)}
-                                  className="flex-1 py-1 bg-blue-600/80 hover:bg-blue-600 text-white text-[10px] font-bold rounded flex items-center justify-center space-x-1 transition-all cursor-pointer"
+                                  className="py-1 px-1.5 bg-blue-600/80 hover:bg-blue-600 text-white text-[10px] font-bold rounded flex items-center justify-center transition-all cursor-pointer"
+                                  title="Fill Class Diary"
                                 >
                                   <FileText className="w-3 h-3" />
-                                  <span>Diary</span>
                                 </button>
                               )}
 
                               <button
                                 onClick={() => onTriggerAlert(entry)}
-                                className="py-1 px-2 bg-slate-950 hover:bg-slate-900 text-amber-400 text-[10px] font-medium rounded border border-slate-800 flex items-center justify-center transition-all cursor-pointer"
+                                className="py-1 px-1.5 bg-slate-950 hover:bg-slate-900 text-amber-400 text-[10px] font-medium rounded border border-slate-800 flex items-center justify-center transition-all cursor-pointer"
                                 title="Test 10-min bell alarm"
                               >
                                 <Bell className="w-3 h-3" />
@@ -1175,6 +1285,222 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
         currentUser={currentUser}
         defaultClassBatch={qrEnrollmentClassBatch}
       />
+
+      {/* Edit Class Routine Entry Modal */}
+      {editingEntry && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-600/30 border border-indigo-500/50 flex items-center justify-center text-indigo-400">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-extrabold text-base text-white">Edit Class Routine Entry</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">ID: {editingEntry.id}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingEntry(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditModal} className="space-y-4 text-xs">
+              {/* Subject Name & Subject Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Subject / Course Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.subjectName}
+                    onChange={(e) => setEditForm({ ...editForm, subjectName: e.target.value })}
+                    placeholder="e.g. Financial Accounting"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Subject / Paper Code *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.subjectCode}
+                    onChange={(e) => setEditForm({ ...editForm, subjectCode: e.target.value })}
+                    placeholder="e.g. COM101"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Day, Start Time, End Time */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Day of Week *</label>
+                  <select
+                    value={editForm.day}
+                    onChange={(e) => setEditForm({ ...editForm, day: e.target.value as DayOfWeek })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    {DAYS_OF_WEEK.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Start Time *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.startTime}
+                    onChange={(e) => setEditForm({ ...editForm, startTime: e.target.value })}
+                    placeholder="09:00"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">End Time *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.endTime}
+                    onChange={(e) => setEditForm({ ...editForm, endTime: e.target.value })}
+                    placeholder="10:00"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Room & Class / Batch */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Room / Venue *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.room}
+                    onChange={(e) => setEditForm({ ...editForm, room: e.target.value })}
+                    placeholder="e.g. Room No. C1"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Batch / Class / Section *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editForm.batch}
+                    onChange={(e) => setEditForm({ ...editForm, batch: e.target.value })}
+                    placeholder="e.g. FYUGP 1st Semester"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Department & Paper Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Department</label>
+                  <input
+                    type="text"
+                    value={editForm.department}
+                    onChange={(e) => setEditForm({ ...editForm, department: e.target.value })}
+                    placeholder="e.g. Commerce"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Paper Category</label>
+                  <select
+                    value={editForm.paperCategory}
+                    onChange={(e) => setEditForm({ ...editForm, paperCategory: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                  >
+                    <option value="Major">Major Core</option>
+                    <option value="Minor">Minor</option>
+                    <option value="MDC">MDC</option>
+                    <option value="SEC">SEC</option>
+                    <option value="VAC">VAC</option>
+                    <option value="AEC">AEC</option>
+                    <option value="HS Core">HS Core</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Teacher Name */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">Assigned Teacher / Faculty</label>
+                <input
+                  type="text"
+                  value={editForm.facultyName}
+                  onChange={(e) => setEditForm({ ...editForm, facultyName: e.target.value })}
+                  placeholder="e.g. Dr. Deborshee Gogoi"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Notes & Substitute Checkbox */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">Notes / Instructions</label>
+                <input
+                  type="text"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  placeholder="Optional class instructions or topic notes"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="editSubstituteCheck"
+                  checked={editForm.isSubstitute}
+                  onChange={(e) => setEditForm({ ...editForm, isSubstitute: e.target.checked })}
+                  className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-950 border-slate-700"
+                />
+                <label htmlFor="editSubstituteCheck" className="text-amber-300 font-bold cursor-pointer select-none">
+                  Mark as Substitute / Replacement Class
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={handleDeleteEditModal}
+                  className="px-3.5 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-600 text-white font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Class</span>
+                </button>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingEntry(null)}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-lg shadow-indigo-600/30"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save Changes</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

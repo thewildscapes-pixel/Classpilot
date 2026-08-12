@@ -1544,6 +1544,9 @@ export default function App() {
                   isFacultyNameMatch(r.facultyName, currentUser?.name || '')
               ) || null
             }
+            onUpdateEntry={handleUpdateEntry}
+            onDeleteEntry={handleDeleteEntry}
+            onAddEntry={handleAddEntry}
           />
         )}
 

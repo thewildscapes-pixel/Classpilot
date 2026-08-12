@@ -3116,6 +3116,17 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                                   <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[10px]">
                                     {item.room}
                                   </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openEditModal(item);
+                                    }}
+                                    className="px-1.5 py-0.5 rounded bg-indigo-600/80 hover:bg-indigo-600 text-white font-bold text-[10px] flex items-center space-x-1 transition cursor-pointer shadow-sm"
+                                    title="Edit Class Routine Entry"
+                                  >
+                                    <Edit2 className="w-2.5 h-2.5" />
+                                    <span>Edit</span>
+                                  </button>
                                 </div>
                               </div>
                             <div className="font-bold text-white text-xs">{item.subjectName} ({item.subjectCode})</div>
