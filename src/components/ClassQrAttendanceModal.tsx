@@ -80,19 +80,8 @@ export const ClassQrAttendanceModal: React.FC<ClassQrAttendanceModalProps> = ({
     generateNewToken();
   }, [entry.id]);
 
-  const qrPayload = JSON.stringify({
-    type: 'CLASSPILOT_ATTENDANCE_QR',
-    classId: entry.id,
-    subjectCode: entry.subjectCode,
-    subjectName: entry.subjectName,
-    batch: entry.batch,
-    room: entry.room,
-    facultyName,
-    date: date.toISOString().split('T')[0],
-    time: `${entry.startTime} - ${entry.endTime}`,
-    sessionToken,
-    passcode,
-  });
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const qrPayload = `${baseUrl}/?enrollToken=${sessionToken}&classId=${entry.id}&batch=${encodeURIComponent(entry.batch)}&subject=${encodeURIComponent(entry.subjectName)}&room=${encodeURIComponent(entry.room)}`;
 
   const handleCopyQrData = () => {
     navigator.clipboard.writeText(qrPayload);

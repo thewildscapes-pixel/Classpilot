@@ -3,6 +3,7 @@ import { TimetableEntry, Faculty, Room, Student, DayOfWeek, ScheduleConflict, Us
 import { AdminNaacReports } from './AdminNaacReports';
 import { AdminSqliteIntegrityView } from './AdminSqliteIntegrityView';
 import { AdminFacultySelfImportsView } from './AdminFacultySelfImportsView';
+import { StudentQREnrollmentsManager } from './StudentQREnrollmentsManager';
 import { DiagnosticBadge } from './DiagnosticBadge';
 import {
   DAYS_OF_WEEK,
@@ -1278,6 +1279,8 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           return 'Monday';
         };
 
+        const newlyAddedFacultiesMap = new Map<string, Faculty>();
+
         const converted: Partial<TimetableEntry>[] = data.map((row, idx) => {
           const rawDay = getRowVal(row, ['day', 'weekday']);
           const day = normalizeDay(rawDay);
@@ -1299,25 +1302,22 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           }
 
           const facName = getRowVal(row, ['facultyname', 'faculty', 'teacher', 'instructor', 'lecturer', 'prof', 'name']) || 'Unassigned Faculty';
-          let facMatch = facultyList.find((f) => isFacultyNameMatch(f.name, facName));
+          const facNameClean = facName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+          let facMatch = facultyList.find((f) => isFacultyNameMatch(f.name, facName)) || newlyAddedFacultiesMap.get(facNameClean);
 
           if (!facMatch && facName.toLowerCase() !== 'unassigned' && facName.toLowerCase() !== 'vacant') {
             const newFacId = `fac_${Date.now()}_${idx}`;
             const dept = getRowVal(row, ['department', 'dept', 'branch']) || 'Commerce';
-            onAddFaculty({
+            const newFac: Faculty = {
               id: newFacId,
-              name: facName,
-              email: `${facName.toLowerCase().replace(/[^a-z0-9]/g, '')}@college.edu`,
-              department: dept,
-              designation: 'Faculty Member',
-            });
-            facMatch = {
-              id: newFacId,
-              name: facName,
-              email: '',
+              name: facName.trim(),
+              email: `${facNameClean}@college.edu`,
               department: dept,
               designation: 'Faculty Member',
             };
+            newlyAddedFacultiesMap.set(facNameClean, newFac);
+            onAddFaculty(newFac);
+            facMatch = newFac;
           }
 
           const subjCode = getRowVal(row, ['subjectcode', 'code', 'papercode']) || 'COM101';
@@ -4244,6 +4244,13 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       {/* ===================== TAB: MANAGE STUDENTS & ROSTER UPLOAD ===================== */}
       {activeAdminTab === 'students' && (
         <div className="space-y-6">
+          {/* Central QR Enrollment Manager */}
+          <StudentQREnrollmentsManager
+            students={students}
+            onUpdateStudents={onUpdateStudents || (() => {})}
+            currentUser={currentUser}
+          />
+
           <div className="bg-slate-800/90 rounded-2xl p-6 border border-slate-700 space-y-4 shadow-xl">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center space-x-3">
@@ -4252,10 +4259,10 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 </div>
                 <div>
                   <h3 className="font-heading font-extrabold text-lg text-white">
-                    Class Student Roster & Excel Import
+                    Manual Excel Import & Add Student
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Upload class-wise student rosters to auto-populate Class Diary attendance checklists and cumulative NAAC tracking.
+                    Upload class-wise student rosters via Excel or add individual students manually.
                   </p>
                 </div>
               </div>

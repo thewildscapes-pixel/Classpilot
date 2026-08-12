@@ -69,6 +69,39 @@
         "entriesCount": { "type": "number" }
       },
       "required": ["id", "facultyName", "fileName", "importedAt"]
+    },
+    "QREnrollmentSession": {
+      "title": "QR Enrollment Session",
+      "description": "Active QR Code sessions for student self-enrollment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "token": { "type": "string" },
+        "title": { "type": "string" },
+        "classBatch": { "type": "string" },
+        "section": { "type": "string" },
+        "department": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "token", "classBatch", "section"]
+    },
+    "StudentEnrollment": {
+      "title": "Student Enrollment",
+      "description": "Student self-enrollment form submissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sessionId": { "type": "string" },
+        "name": { "type": "string" },
+        "rollNo": { "type": "string" },
+        "mobile": { "type": "string" },
+        "classBatch": { "type": "string" },
+        "section": { "type": "string" },
+        "status": { "type": "string" },
+        "submittedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "rollNo", "mobile", "classBatch", "status"]
     }
   },
   "firestore": {
@@ -87,6 +120,14 @@
     "/faculty_self_imports/{recordId}": {
       "schema": { "$ref": "#/entities/FacultySelfImportRecord" },
       "description": "Faculty self-imported routines"
+    },
+    "/qr_enrollment_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/QREnrollmentSession" },
+      "description": "QR Code Enrollment Sessions"
+    },
+    "/student_enrollments/{enrollmentId}": {
+      "schema": { "$ref": "#/entities/StudentEnrollment" },
+      "description": "Student Self-Enrollment Submissions"
     }
   }
 }

@@ -44,14 +44,7 @@ interface ClassDiaryViewProps {
   faculties?: Faculty[];
 }
 
-const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [
-  { id: 'sys_1', subjectCode: 'COM-101', subjectName: 'Financial Accounting', department: 'Commerce', unitName: 'Unit 1: Accounting Framework', topicTitle: 'Accounting Concepts, Conventions & Standards', isCompleted: true },
-  { id: 'sys_2', subjectCode: 'COM-101', subjectName: 'Financial Accounting', department: 'Commerce', unitName: 'Unit 1: Accounting Framework', topicTitle: 'Journal, Ledger & Trial Balance Preparation', isCompleted: true },
-  { id: 'sys_3', subjectCode: 'COM-101', subjectName: 'Financial Accounting', department: 'Commerce', unitName: 'Unit 2: Depreciation Accounting', topicTitle: 'SLM vs WDV Depreciation Methods', isCompleted: false },
-  { id: 'sys_4', subjectCode: 'COM-101', subjectName: 'Financial Accounting', department: 'Commerce', unitName: 'Unit 2: Depreciation Accounting', topicTitle: 'Inventory Valuation & AS-2 Compliance', isCompleted: false },
-  { id: 'sys_5', subjectCode: 'CS-101', subjectName: 'Problem Solving using C', department: 'Computer Science', unitName: 'Unit 1: C Basics', topicTitle: 'Control Flow & Loops in C', isCompleted: true },
-  { id: 'sys_6', subjectCode: 'CS-101', subjectName: 'Problem Solving using C', department: 'Computer Science', unitName: 'Unit 2: Functions & Pointers', topicTitle: 'Pointer Arithmetic & Memory Allocation', isCompleted: false },
-];
+const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [];
 
 const DEFAULT_STUDENTS: { studentId: string; rollNo: string; name: string }[] = [];
 
@@ -74,16 +67,16 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
-  // Form Fields
+  // Form Fields - initialized dynamically from active timetable entries if available
   const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [formStartTime, setFormStartTime] = useState<string>('09:00');
   const [formEndTime, setFormEndTime] = useState<string>('10:00');
-  const [formSubjectCode, setFormSubjectCode] = useState<string>('COM-101');
-  const [formSubjectName, setFormSubjectName] = useState<string>('Financial Accounting');
-  const [formBatch, setFormBatch] = useState<string>('FYUGP 1st Sem - Commerce');
-  const [formRoom, setFormRoom] = useState<string>('LH-01');
+  const [formSubjectCode, setFormSubjectCode] = useState<string>(timetable[0]?.subjectCode || '');
+  const [formSubjectName, setFormSubjectName] = useState<string>(timetable[0]?.subjectName || '');
+  const [formBatch, setFormBatch] = useState<string>(timetable[0]?.batch || '');
+  const [formRoom, setFormRoom] = useState<string>(timetable[0]?.room || '');
   const [formTopic, setFormTopic] = useState<string>('');
-  const [formSyllabusUnit, setFormSyllabusUnit] = useState<string>('Unit 1: Accounting Framework');
+  const [formSyllabusUnit, setFormSyllabusUnit] = useState<string>('Unit 1');
   const [formDuration, setFormDuration] = useState<number>(60);
   const [formRemarks, setFormRemarks] = useState<string>('');
   const [formAttendance, setFormAttendance] = useState<AttendanceRecord[]>([]);

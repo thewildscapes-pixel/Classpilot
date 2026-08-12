@@ -14,7 +14,7 @@ export const INITIAL_STUDENTS: Student[] = [];
 export const DEMO_USERS: User[] = [
   {
     id: 'user_superadmin',
-    name: 'Super Admin',
+    name: 'Dr. Deborshee Gogoi',
     email: 'thewildscapes@gmail.com',
     role: 'admin',
     department: 'Commerce',

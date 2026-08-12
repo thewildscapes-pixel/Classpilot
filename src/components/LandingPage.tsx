@@ -37,12 +37,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onLogout,
   onGoToDashboard,
 }) => {
-  // Form input state matching requested combined OTP flow
-  const [email, setEmail] = useState<string>('deborsheegogoi@gmail.com');
-  const [phone, setPhone] = useState<string>('9706375001');
+  // Form input state
+  const [email, setEmail] = useState<string>('');
+  const [phone, setPhone] = useState<string>('');
   const [selectedFacultyIdForLogin, setSelectedFacultyIdForLogin] = useState<string>('');
   const [otpStep, setOtpStep] = useState<boolean>(false);
-  const [otpDigits, setOtpDigits] = useState<string[]>(['8', '4', '9', '2', '0', '1']);
+  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
 
   // Logged-in Faculty Role & Profile Settings
   const [activeRole, setActiveRole] = useState<'educator' | 'mentor'>('educator');
@@ -124,7 +124,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
       const newUser: User = {
         id: matchedFac ? matchedFac.id : `user_${Date.now()}`,
-        name: matchedFac ? matchedFac.name : facultyName.trim() || 'Dr. Faculty Member',
+        name: matchedFac ? matchedFac.name : facultyName.trim() || 'Faculty Member',
         email: matchedFac ? matchedFac.email : email.trim() || 'faculty@digboicollege.edu.in',
         phone: cleanPhone,
         whatsappPhone: cleanPhone,

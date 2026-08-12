@@ -22,7 +22,7 @@ import {
   writeBatch,
   FirebaseUser,
 } from './firebase';
-import { User, TimetableEntry, ClassDiaryEntry, RoutineVersion, RoutineBackup, RawRoutineFile, Faculty, Room, FacultySelfImportRecord } from '../types';
+import { User, TimetableEntry, ClassDiaryEntry, RoutineVersion, RoutineBackup, RawRoutineFile, Faculty, Room, FacultySelfImportRecord, QREnrollmentSession, StudentEnrollment, Student } from '../types';
 
 // ==========================================
 // 1. AUTHENTICATION & FACULTY PROFILES
@@ -1206,6 +1206,166 @@ export async function getFacultySelfImportsFromFirestore(): Promise<FacultySelfI
   } catch (err) {
     console.warn('[getFacultySelfImportsFromFirestore] Error:', err);
     return [];
+  }
+}
+
+// ==========================================
+// 8. QR ENROLLMENT SESSIONS & STUDENT SELF-ENROLLMENT
+// ==========================================
+
+/**
+ * Save or update QR Enrollment Session in Firestore
+ */
+export async function saveQREnrollmentSessionToFirestore(session: QREnrollmentSession): Promise<void> {
+  try {
+    const docRef = doc(db, 'qr_enrollment_sessions', session.id);
+    await setDoc(docRef, {
+      ...session,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    console.log(`[Firestore] Saved QR Enrollment Session ${session.id} (${session.classBatch})`);
+  } catch (err) {
+    console.warn('[saveQREnrollmentSessionToFirestore] Error:', err);
+  }
+}
+
+/**
+ * Realtime listener for QR Enrollment Sessions
+ */
+export function subscribeToQREnrollmentSessionsRealtime(callback: (sessions: QREnrollmentSession[]) => void): () => void {
+  try {
+    const colRef = collection(db, 'qr_enrollment_sessions');
+    return onSnapshot(colRef, (snapshot) => {
+      const list: QREnrollmentSession[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          token: d.token || docSnap.id,
+          title: d.title || 'Class Enrollment',
+          classBatch: d.classBatch || '',
+          section: d.section || 'Section A',
+          department: d.department || '',
+          semester: d.semester || '',
+          subjectCode: d.subjectCode || '',
+          subjectName: d.subjectName || '',
+          createdBy: d.createdBy || 'Admin',
+          createdAt: d.createdAt || new Date().toISOString(),
+          expiresAt: d.expiresAt || null,
+          isActive: d.isActive !== undefined ? d.isActive : true,
+          enrollmentUrl: d.enrollmentUrl || '',
+          notes: d.notes || '',
+        });
+      });
+      callback(list);
+    }, (err) => {
+      console.warn('[subscribeToQREnrollmentSessionsRealtime] Error:', err);
+    });
+  } catch (err) {
+    console.warn('[subscribeToQREnrollmentSessionsRealtime] Exception:', err);
+    return () => {};
+  }
+}
+
+/**
+ * Save Student Self-Enrollment Submission
+ */
+export async function saveStudentEnrollmentToFirestore(enrollment: StudentEnrollment): Promise<void> {
+  try {
+    const docRef = doc(db, 'student_enrollments', enrollment.id);
+    await setDoc(docRef, {
+      ...enrollment,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    console.log(`[Firestore] Saved Student Enrollment Submission ${enrollment.id} (${enrollment.name})`);
+  } catch (err) {
+    console.warn('[saveStudentEnrollmentToFirestore] Error:', err);
+  }
+}
+
+/**
+ * Save Student Record Directly to Roster in Firestore
+ */
+export async function saveStudentToFirestore(student: Student): Promise<void> {
+  try {
+    const docRef = doc(db, 'students', student.id);
+    await setDoc(docRef, {
+      ...student,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    console.log(`[Firestore] Synchronized student ${student.id} (${student.name}) to Master Roster`);
+  } catch (err) {
+    console.warn('[saveStudentToFirestore] Error:', err);
+  }
+}
+
+/**
+ * Realtime listener for Student Enrollment Submissions
+ */
+export function subscribeToStudentEnrollmentsRealtime(callback: (enrollments: StudentEnrollment[]) => void): () => void {
+  try {
+    const colRef = collection(db, 'student_enrollments');
+    return onSnapshot(colRef, (snapshot) => {
+      const list: StudentEnrollment[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          sessionId: d.sessionId || '',
+          sessionToken: d.sessionToken || '',
+          name: d.name || '',
+          rollNo: d.rollNo || '',
+          mobile: d.mobile || '',
+          email: d.email || '',
+          classBatch: d.classBatch || '',
+          section: d.section || 'Section A',
+          department: d.department || '',
+          semester: d.semester || '',
+          status: d.status || 'pending',
+          enrollmentSource: d.enrollmentSource || 'qr_self_enrollment',
+          submittedAt: d.submittedAt || new Date().toISOString(),
+          reviewedAt: d.reviewedAt || undefined,
+          reviewedBy: d.reviewedBy || undefined,
+          masterMatchStatus: d.masterMatchStatus || undefined,
+          reassignedFrom: d.reassignedFrom || undefined,
+        });
+      });
+      callback(list);
+    }, (err) => {
+      console.warn('[subscribeToStudentEnrollmentsRealtime] Error:', err);
+    });
+  } catch (err) {
+    console.warn('[subscribeToStudentEnrollmentsRealtime] Exception:', err);
+    return () => {};
+  }
+}
+
+/**
+ * Update Student Enrollment Status (e.g. approve / reject / reassign)
+ */
+export async function updateStudentEnrollmentStatusInFirestore(
+  enrollmentId: string,
+  status: 'approved' | 'rejected' | 'pending',
+  reviewedBy: string,
+  reassignedClassBatch?: string,
+  reassignedSection?: string
+): Promise<void> {
+  try {
+    const docRef = doc(db, 'student_enrollments', enrollmentId);
+    const updates: any = {
+      status,
+      reviewedAt: new Date().toISOString(),
+      reviewedBy,
+    };
+    if (reassignedClassBatch) {
+      updates.classBatch = reassignedClassBatch;
+    }
+    if (reassignedSection) {
+      updates.section = reassignedSection;
+    }
+    await updateDoc(docRef, updates);
+  } catch (err) {
+    console.warn('[updateStudentEnrollmentStatusInFirestore] Error:', err);
   }
 }
 

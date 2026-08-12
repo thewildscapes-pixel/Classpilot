@@ -234,6 +234,45 @@ async function initDatabase() {
       autoRepaired INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS qr_enrollment_sessions (
+      id TEXT PRIMARY KEY,
+      token TEXT NOT NULL,
+      title TEXT,
+      classBatch TEXT,
+      section TEXT,
+      department TEXT,
+      semester TEXT,
+      subjectCode TEXT,
+      subjectName TEXT,
+      createdBy TEXT,
+      createdAt TEXT,
+      expiresAt TEXT,
+      isActive INTEGER DEFAULT 1,
+      enrollmentUrl TEXT,
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS student_enrollments (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT,
+      sessionToken TEXT,
+      name TEXT NOT NULL,
+      rollNo TEXT NOT NULL,
+      mobile TEXT NOT NULL,
+      email TEXT,
+      classBatch TEXT,
+      section TEXT,
+      department TEXT,
+      semester TEXT,
+      status TEXT DEFAULT 'pending',
+      enrollmentSource TEXT DEFAULT 'qr_self_enrollment',
+      submittedAt TEXT,
+      reviewedAt TEXT,
+      reviewedBy TEXT,
+      masterMatchStatus TEXT,
+      reassignedFrom TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tt_day_time ON timetable(day, startTime, endTime);
     CREATE INDEX IF NOT EXISTS idx_tt_faculty ON timetable(facultyId);
     CREATE INDEX IF NOT EXISTS idx_tt_department ON timetable(department);
@@ -1050,6 +1089,200 @@ async function startServer() {
     const { id } = req.params;
     runSql('DELETE FROM students WHERE id = ?', [id]);
     res.json({ success: true, id });
+  });
+
+  // --- QR ENROLLMENT SESSIONS API ---
+  app.get('/api/qr-sessions', (req, res) => {
+    const rows = queryAll('SELECT * FROM qr_enrollment_sessions ORDER BY createdAt DESC');
+    const sessions = rows.map((r: any) => ({
+      ...r,
+      isActive: Boolean(r.isActive),
+    }));
+    res.json(sessions);
+  });
+
+  app.post('/api/qr-sessions', (req, res) => {
+    const s = {
+      id: req.body.id || `qr_sec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      token: req.body.token || `token_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+      title: req.body.title || 'Class Enrollment',
+      classBatch: req.body.classBatch || '',
+      section: req.body.section || 'Section A',
+      department: req.body.department || '',
+      semester: req.body.semester || '',
+      subjectCode: req.body.subjectCode || '',
+      subjectName: req.body.subjectName || '',
+      createdBy: req.body.createdBy || 'Admin',
+      createdAt: req.body.createdAt || new Date().toISOString(),
+      expiresAt: req.body.expiresAt || null,
+      isActive: req.body.isActive !== undefined ? (req.body.isActive ? 1 : 0) : 1,
+      enrollmentUrl: req.body.enrollmentUrl || '',
+      notes: req.body.notes || '',
+    };
+
+    runSql(
+      `INSERT OR REPLACE INTO qr_enrollment_sessions
+      (id, token, title, classBatch, section, department, semester, subjectCode, subjectName, createdBy, createdAt, expiresAt, isActive, enrollmentUrl, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [s.id, s.token, s.title, s.classBatch, s.section, s.department, s.semester, s.subjectCode, s.subjectName, s.createdBy, s.createdAt, s.expiresAt, s.isActive, s.enrollmentUrl, s.notes]
+    );
+
+    res.json({ ...s, isActive: Boolean(s.isActive) });
+  });
+
+  app.patch('/api/qr-sessions/:id', (req, res) => {
+    const { id } = req.params;
+    const { isActive, expiresAt, notes } = req.body;
+
+    if (isActive !== undefined) {
+      runSql('UPDATE qr_enrollment_sessions SET isActive = ? WHERE id = ?', [isActive ? 1 : 0, id]);
+    }
+    if (expiresAt !== undefined) {
+      runSql('UPDATE qr_enrollment_sessions SET expiresAt = ? WHERE id = ?', [expiresAt, id]);
+    }
+    if (notes !== undefined) {
+      runSql('UPDATE qr_enrollment_sessions SET notes = ? WHERE id = ?', [notes, id]);
+    }
+
+    const updated = queryAll('SELECT * FROM qr_enrollment_sessions WHERE id = ?', [id]);
+    res.json(updated[0] || { success: true });
+  });
+
+  app.delete('/api/qr-sessions/:id', (req, res) => {
+    const { id } = req.params;
+    runSql('DELETE FROM qr_enrollment_sessions WHERE id = ?', [id]);
+    res.json({ success: true, id });
+  });
+
+  // --- STUDENT SELF-ENROLLMENT SUBMISSIONS API ---
+  app.get('/api/student-enrollments', (req, res) => {
+    const rows = queryAll('SELECT * FROM student_enrollments ORDER BY submittedAt DESC');
+    res.json(rows);
+  });
+
+  // Public Submission API for QR scan (No login required!)
+  app.post('/api/student-enrollments/public-submit', (req, res) => {
+    const { token, sessionId, name, rollNo, mobile, email } = req.body;
+
+    const cleanName = (name || '').trim();
+    const cleanRollNo = (rollNo || '').trim().toUpperCase();
+    const cleanMobile = (mobile || '').trim().replace(/\D/g, '');
+    const cleanEmail = (email || '').trim();
+
+    if (!cleanName || !cleanRollNo || !cleanMobile) {
+      res.status(400).json({ error: 'Student Name, Roll Number, and 10-digit Mobile Number are required.' });
+      return;
+    }
+
+    if (cleanMobile.length < 10) {
+      res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
+      return;
+    }
+
+    // Lookup session by token or sessionId
+    let sessionRow: any = null;
+    if (token) {
+      const sessList = queryAll('SELECT * FROM qr_enrollment_sessions WHERE token = ?', [token]);
+      if (sessList.length > 0) sessionRow = sessList[0];
+    }
+    if (!sessionRow && sessionId) {
+      const sessList = queryAll('SELECT * FROM qr_enrollment_sessions WHERE id = ?', [sessionId]);
+      if (sessList.length > 0) sessionRow = sessList[0];
+    }
+
+    if (sessionRow) {
+      if (!Boolean(sessionRow.isActive)) {
+        res.status(400).json({ error: 'This QR Enrollment link has been deactivated by the institution.' });
+        return;
+      }
+      if (sessionRow.expiresAt && new Date(sessionRow.expiresAt).getTime() < Date.now()) {
+        res.status(400).json({ error: 'This QR Enrollment session has expired. Please request a new QR code from your coordinator.' });
+        return;
+      }
+    }
+
+    const classBatch = sessionRow ? sessionRow.classBatch : (req.body.classBatch || 'FYUGP 1st Sem Commerce');
+    const section = sessionRow ? sessionRow.section : (req.body.section || 'Section A');
+    const department = sessionRow ? sessionRow.department : (req.body.department || '');
+    const semester = sessionRow ? sessionRow.semester : (req.body.semester || '');
+
+    // Duplicate Check by Roll Number or Mobile Number for this Class/Section
+    const existingSameClass = queryAll(
+      'SELECT * FROM student_enrollments WHERE (UPPER(rollNo) = ? OR mobile = ?) AND (classBatch = ? OR sessionId = ?)',
+      [cleanRollNo, cleanMobile, classBatch, sessionRow ? sessionRow.id : '']
+    );
+
+    if (existingSameClass.length > 0) {
+      const existing = existingSameClass[0];
+      res.status(400).json({
+        error: `A student with Roll Number "${cleanRollNo}" or Mobile "${cleanMobile}" has already submitted an enrollment for ${classBatch} (${existing.section || 'Section A'}). Status: ${existing.status || 'pending'}.`,
+        isDuplicate: true,
+      });
+      return;
+    }
+
+    const enrollmentId = `enr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const submittedAt = new Date().toISOString();
+
+    runSql(
+      `INSERT INTO student_enrollments
+      (id, sessionId, sessionToken, name, rollNo, mobile, email, classBatch, section, department, semester, status, enrollmentSource, submittedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        enrollmentId,
+        sessionRow ? sessionRow.id : (sessionId || ''),
+        sessionRow ? sessionRow.token : (token || ''),
+        cleanName,
+        cleanRollNo,
+        cleanMobile,
+        cleanEmail,
+        classBatch,
+        section,
+        department,
+        semester,
+        'pending',
+        'qr_self_enrollment',
+        submittedAt,
+      ]
+    );
+
+    const created = {
+      id: enrollmentId,
+      sessionId: sessionRow ? sessionRow.id : '',
+      sessionToken: sessionRow ? sessionRow.token : '',
+      name: cleanName,
+      rollNo: cleanRollNo,
+      mobile: cleanMobile,
+      email: cleanEmail,
+      classBatch,
+      section,
+      department,
+      semester,
+      status: 'pending',
+      enrollmentSource: 'qr_self_enrollment',
+      submittedAt,
+    };
+
+    res.json({ success: true, enrollment: created });
+  });
+
+  app.patch('/api/student-enrollments/:id', (req, res) => {
+    const { id } = req.params;
+    const { status, reviewedBy, classBatch, section } = req.body;
+
+    const reviewedAt = new Date().toISOString();
+
+    if (status) {
+      runSql('UPDATE student_enrollments SET status = ?, reviewedAt = ?, reviewedBy = ? WHERE id = ?', [status, reviewedAt, reviewedBy || 'Admin', id]);
+    }
+    if (classBatch) {
+      runSql('UPDATE student_enrollments SET classBatch = ? WHERE id = ?', [classBatch, id]);
+    }
+    if (section) {
+      runSql('UPDATE student_enrollments SET section = ? WHERE id = ?', [section, id]);
+    }
+
+    res.json({ success: true, id, status, reviewedAt });
   });
 
   app.post('/api/students/import', (req, res) => {

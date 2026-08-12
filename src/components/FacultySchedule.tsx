@@ -3,6 +3,7 @@ import { TimetableEntry, Faculty, DayOfWeek, User, Student, FacultySelfImportRec
 import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName, isFacultyNameMatch, isPhoneMatch } from '../utils/timeUtils';
 import { ClassQrAttendanceModal } from './ClassQrAttendanceModal';
 import { FacultySelfImportModal } from './FacultySelfImportModal';
+import { QREnrollmentGeneratorModal } from './QREnrollmentGeneratorModal';
 import {
   Calendar,
   Clock,
@@ -106,6 +107,8 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const [jumpDate, setJumpDate] = useState<string>('');
   const [qrModalEntry, setQrModalEntry] = useState<TimetableEntry | null>(null);
   const [isSelfImportModalOpen, setIsSelfImportModalOpen] = useState<boolean>(false);
+  const [isQREnrollmentModalOpen, setIsQREnrollmentModalOpen] = useState<boolean>(false);
+  const [qrEnrollmentClassBatch, setQrEnrollmentClassBatch] = useState<string>('FYUGP 1st Sem Commerce');
 
   // Normalize day helper for robust day comparison (e.g., 'Mon', 'MONDAY', 'Monday ')
   const normalizeDay = (d: string = ''): string => {
@@ -359,7 +362,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
             <h2>Faculty Master Workload & Timetable Schedule</h2>
           </div>
           <div class="meta">
-            <div><strong>Faculty Member:</strong> ${currentFaculty?.name || 'Dr. Faculty Member'}</div>
+            <div><strong>Faculty Member:</strong> ${currentFaculty?.name || 'Faculty Member'}</div>
             <div><strong>Department:</strong> ${currentFaculty?.department || 'Commerce'}</div>
             <div><strong>Weekly Load:</strong> ${totalWeeklyClasses} Lectures (${totalWeeklyHours} hrs)</div>
             <div><strong>Generated:</strong> ${new Date().toLocaleDateString()}</div>
@@ -606,17 +609,30 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                   </div>
                 </div>
 
-                {/* Direct Action Link to Class Diary Entry */}
-                {onNavigateToDiary && (
+                {/* Direct Actions: Diary & QR Enrollment Generator */}
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                   <button
-                    onClick={() => onNavigateToDiary(highlightClass)}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 flex items-center justify-center space-x-2 shrink-0 transition-all cursor-pointer"
+                    onClick={() => {
+                      setQrEnrollmentClassBatch(highlightClass.batch || 'FYUGP 1st Sem Commerce');
+                      setIsQREnrollmentModalOpen(true);
+                    }}
+                    className="flex-1 sm:flex-none px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center space-x-1.5 transition-all cursor-pointer"
                   >
-                    <FileText className="w-4 h-4 text-white" />
-                    <span>Fill Class Diary Entry</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <QrCode className="w-4 h-4 text-white" />
+                    <span>Enrollment QR</span>
                   </button>
-                )}
+
+                  {onNavigateToDiary && (
+                    <button
+                      onClick={() => onNavigateToDiary(highlightClass)}
+                      className="flex-1 sm:flex-none px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 flex items-center justify-center space-x-2 shrink-0 transition-all cursor-pointer"
+                    >
+                      <FileText className="w-4 h-4 text-white" />
+                      <span>Fill Class Diary</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1071,6 +1087,13 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
           }
         }}
         existingRecord={existingSelfImportRecord}
+      />
+      {/* Student Self-Enrollment QR Generator Modal */}
+      <QREnrollmentGeneratorModal
+        isOpen={isQREnrollmentModalOpen}
+        onClose={() => setIsQREnrollmentModalOpen(false)}
+        currentUser={currentUser}
+        defaultClassBatch={qrEnrollmentClassBatch}
       />
     </div>
   );

@@ -60,6 +60,21 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // QR Code Student Self-Enrollment Sessions
+    match /qr_enrollment_sessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    // Student Enrollment Submissions (Public read & create for scanning students)
+    match /student_enrollments/{enrollmentId} {
+      allow read, write: if true;
+    }
+
+    // Master Student Roster
+    match /students/{studentId} {
+      allow read, write: if true;
+    }
+
     // Calendar Events
     match /calendarEvents/{eventId} {
       allow read: if isAuthenticated();

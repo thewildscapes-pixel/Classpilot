@@ -12,6 +12,8 @@ import {
   RoutineBackup,
   RawRoutineFile,
   FacultySelfImportRecord,
+  QREnrollmentSession,
+  StudentEnrollment,
 } from './types';
 import {
   INITIAL_FACULTY,
@@ -55,6 +57,7 @@ import {
   deleteRoomFromFirestore,
   subscribeToFacultySelfImportsRealtime,
   getFacultySelfImportsFromFirestore,
+  subscribeToQREnrollmentSessionsRealtime,
 } from './lib/firebaseService';
 
 // Components
@@ -68,6 +71,7 @@ import { AdminTimetable } from './components/AdminTimetable';
 import { LoginModal } from './components/LoginModal';
 import { PwaInstallModal } from './components/PwaInstallModal';
 import { LandingPage } from './components/LandingPage';
+import { PublicStudentEnrollmentPage } from './components/PublicStudentEnrollmentPage';
 import { ClassDiaryView } from './components/ClassDiaryView';
 import { GoogleCalendarView } from './components/GoogleCalendarView';
 import { ComplianceResearchView } from './components/ComplianceResearchView';
@@ -79,8 +83,79 @@ import { ActiveAlarm } from './types';
 
 import { Bell, Clock, Trash2, MapPin, CheckCircle, Volume2, Shield } from 'lucide-react';
 
+// Helper to extract student self-enrollment token from any URL structure (query params, hash, path)
+function getEnrollTokenFromUrl(): string | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    // 1. Check window.location.search (?enrollToken=... or ?token=... or ?enroll=... or ?sessionId=... or ?classId=... or ?qr=...)
+    let params = new URLSearchParams(window.location.search);
+    let tok = params.get('enrollToken') || params.get('token') || params.get('enroll') || params.get('sessionId') || params.get('classId') || params.get('qr') || params.get('scan');
+    if (tok) return tok;
+
+    const action = params.get('action');
+    if (action === 'student-enroll' || action === 'enroll') {
+      return params.get('sessionId') || params.get('classId') || 'public_qr_session';
+    }
+
+    // 2. Check window.location.hash (#/?enrollToken=... or #/enroll/...)
+    if (window.location.hash) {
+      const hashStr = window.location.hash;
+      const qIndex = hashStr.indexOf('?');
+      if (qIndex !== -1) {
+        const hashParams = new URLSearchParams(hashStr.substring(qIndex));
+        tok = hashParams.get('enrollToken') || hashParams.get('token') || hashParams.get('enroll') || hashParams.get('sessionId') || hashParams.get('classId') || hashParams.get('qr') || hashParams.get('scan');
+        if (tok) return tok;
+      }
+      if (hashStr.includes('/enroll/') || hashStr.includes('/qr/')) {
+        const parts = hashStr.split(/[/](?:enroll|qr)[/]/);
+        if (parts[1]) return parts[1].split('?')[0];
+      }
+    }
+
+    // 3. Check window.location.pathname (/enroll/token_123 or /qr/token_123)
+    const path = window.location.pathname;
+    if (path.includes('/enroll/') || path.includes('/qr/')) {
+      const parts = path.split(/[/](?:enroll|qr)[/]/);
+      if (parts[1]) return parts[1].split('?')[0];
+    }
+  } catch (e) {
+    console.warn('Error parsing URL for enroll token:', e);
+  }
+
+  return null;
+}
+
 export default function App() {
   // --- STATE MANAGEMENT ---
+  const [enrollToken, setEnrollToken] = useState<string | null>(() => getEnrollTokenFromUrl());
+
+  // Listen for dynamic URL changes (e.g. scanning QR codes or clicking shared links)
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const tok = getEnrollTokenFromUrl();
+      if (tok) {
+        setEnrollToken(tok);
+      }
+    };
+
+    window.addEventListener('popstate', handleUrlChange);
+    window.addEventListener('hashchange', handleUrlChange);
+    return () => {
+      window.removeEventListener('popstate', handleUrlChange);
+      window.removeEventListener('hashchange', handleUrlChange);
+    };
+  }, []);
+
+  const [qrSessions, setQrSessions] = useState<QREnrollmentSession[]>([]);
+
+  useEffect(() => {
+    const unsub = subscribeToQREnrollmentSessionsRealtime((sessions) => {
+      setQrSessions(sessions);
+    });
+    return () => unsub();
+  }, []);
+
   const [facultyList, setFacultyList] = useState<Faculty[]>(() => {
     try {
       const saved = localStorage.getItem('classpilot_faculty_list');
@@ -1350,6 +1425,23 @@ export default function App() {
 
   const currentFaculty = facultyList.find((f) => f.id === selectedFacultyId) || facultyList[0];
   const unreadAlertsCount = notifications.filter((n) => !n.read).length;
+
+  // Render Public Student Self-Enrollment Page if link or QR scanned (No Login Required)
+  if (enrollToken) {
+    return (
+      <PublicStudentEnrollmentPage
+        token={enrollToken}
+        qrSessions={qrSessions}
+        onUpdateStudents={(newStudent) => setStudents((prev) => [...prev, newStudent])}
+        onBackToApp={currentUser ? () => {
+          setEnrollToken(null);
+          if (typeof window !== 'undefined') {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        } : undefined}
+      />
+    );
+  }
 
   // Render Landing Page if no active user session
   if (!currentUser) {

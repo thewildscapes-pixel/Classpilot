@@ -129,8 +129,53 @@ export interface Student {
   name: string;
   classBatch: string;
   section?: string;
+  department?: string;
+  mobile?: string;
+  email?: string;
   academicYear: string;
   sessionId: string;
+  enrollmentSource?: 'qr_self_enrollment' | 'manual_admin';
+  enrollmentId?: string;
+  enrolledAt?: string;
+}
+
+export interface QREnrollmentSession {
+  id: string;
+  token: string;
+  title: string;
+  classBatch: string;
+  section: string;
+  department: string;
+  semester: string;
+  subjectCode?: string;
+  subjectName?: string;
+  createdBy: string;
+  createdAt: string; // ISO string
+  expiresAt: string | null; // ISO string or null
+  isActive: boolean;
+  enrollmentUrl: string;
+  notes?: string;
+}
+
+export interface StudentEnrollment {
+  id: string;
+  sessionId: string;
+  sessionToken?: string;
+  name: string;
+  rollNo: string;
+  mobile: string;
+  email?: string;
+  classBatch: string;
+  section: string;
+  department: string;
+  semester: string;
+  status: 'pending' | 'approved' | 'rejected';
+  enrollmentSource: 'qr_self_enrollment' | 'manual_admin';
+  submittedAt: string; // ISO string
+  reviewedAt?: string;
+  reviewedBy?: string;
+  masterMatchStatus?: 'matched' | 'unmatched_new' | 'duplicate_flagged';
+  reassignedFrom?: string;
 }
 
 export interface AttendanceRecord {
