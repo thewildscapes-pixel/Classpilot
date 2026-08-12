@@ -56,12 +56,84 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   faculties = [],
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'records' | 'attendance' | 'syllabus'>('records');
-  const [diaryEntries, setDiaryEntries] = useState<ClassDiaryEntry[]>([]);
+  const [diaryEntries, setDiaryEntries] = useState<ClassDiaryEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((e: any) => ({
+            ...e,
+            batch: e.batch || e.classBatch || '',
+            topicTaught: e.topicTaught || '',
+            subjectCode: e.subjectCode || '',
+            subjectName: e.subjectName || '',
+            room: e.room || 'LH-01',
+            department: e.department || 'Commerce',
+            syllabusUnit: e.syllabusUnit || 'Unit 1',
+            durationMins: e.durationMins || 60,
+            remarks: e.remarks || '',
+            attendance: e.attendance || [],
+          }));
+        }
+      }
+    } catch (e) {}
+    return [];
+  });
   const [syllabusTopics, setSyllabusTopics] = useState<SyllabusTopic[]>(DEFAULT_SYLLABUS_TOPICS);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterSubject, setFilterSubject] = useState<string>('All');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [offlineDrafts, setOfflineDrafts] = useState<ClassDiaryEntry[]>([]);
+
+  // Helper function to safely merge incoming diary entries into state and localStorage
+  const mergeEntries = (existing: ClassDiaryEntry[], incoming: ClassDiaryEntry[]): ClassDiaryEntry[] => {
+    const entryMap = new Map<string, ClassDiaryEntry>();
+    existing.forEach((e) => {
+      if (e && e.id) {
+        entryMap.set(e.id, {
+          ...e,
+          batch: e.batch || (e as any).classBatch || '',
+          topicTaught: e.topicTaught || '',
+          subjectCode: e.subjectCode || '',
+          subjectName: e.subjectName || '',
+          room: e.room || 'LH-01',
+          department: e.department || 'Commerce',
+          syllabusUnit: e.syllabusUnit || 'Unit 1',
+          durationMins: e.durationMins || 60,
+          remarks: e.remarks || '',
+          attendance: e.attendance || [],
+        });
+      }
+    });
+    incoming.forEach((e) => {
+      if (e && e.id) {
+        const prev = entryMap.get(e.id);
+        entryMap.set(e.id, {
+          ...prev,
+          ...e,
+          batch: e.batch || (e as any).classBatch || prev?.batch || '',
+          topicTaught: e.topicTaught || prev?.topicTaught || '',
+          subjectCode: e.subjectCode || prev?.subjectCode || '',
+          subjectName: e.subjectName || prev?.subjectName || '',
+          room: e.room || prev?.room || 'LH-01',
+          department: e.department || prev?.department || 'Commerce',
+          syllabusUnit: e.syllabusUnit || prev?.syllabusUnit || 'Unit 1',
+          durationMins: e.durationMins || prev?.durationMins || 60,
+          remarks: e.remarks || prev?.remarks || '',
+          attendance: (e.attendance && e.attendance.length > 0) ? e.attendance : (prev?.attendance || []),
+        });
+      }
+    });
+    const merged = Array.from(entryMap.values()).sort(
+      (a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime()
+    );
+    try {
+      localStorage.setItem('classpilot_class_diary', JSON.stringify(merged));
+      localStorage.setItem('lecturapulse_class_diary', JSON.stringify(merged));
+    } catch (e) {}
+    return merged;
+  };
 
   // Modal form state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
@@ -129,12 +201,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       currentUser.role === 'admin',
       (entries) => {
         if (entries && entries.length > 0) {
-          setDiaryEntries((prev) => {
-            // merge or replace with real-time entries
-            const merged = [...entries];
-            // keep local seed if Firestore has no entries yet
-            return merged;
-          });
+          setDiaryEntries((prev) => mergeEntries(prev, entries));
         }
       }
     );
@@ -151,10 +218,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
-          setDiaryEntries(data);
-          try {
-            localStorage.setItem('classpilot_class_diary', JSON.stringify(data));
-          } catch (e) {}
+          setDiaryEntries((prev) => mergeEntries(prev, data));
         } else {
           loadLocalDiaryEntries();
         }
@@ -172,15 +236,12 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter((entry: ClassDiaryEntry) => entry.id !== 'diary_1' && entry.id !== 'diary_2');
-          setDiaryEntries(cleaned);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setDiaryEntries((prev) => mergeEntries(prev, parsed));
           return;
         }
       }
     } catch (err) {}
-
-    setDiaryEntries([]);
   };
 
   const loadOfflineDrafts = () => {
@@ -370,9 +431,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       console.log('Saved to Firestore local cache and scheduled for auto-sync');
     }
 
-    const updated = [...diaryEntries.filter(d => d.id !== newEntry.id), newEntry];
-    setDiaryEntries(updated);
-    localStorage.setItem('classpilot_class_diary', JSON.stringify(updated));
+    setDiaryEntries((prev) => mergeEntries(prev, [newEntry]));
 
     setIsModalOpen(false);
   };

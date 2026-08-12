@@ -182,16 +182,23 @@ async function initDatabase() {
       id TEXT PRIMARY KEY,
       facultyId TEXT,
       facultyName TEXT,
+      department TEXT,
       timetableEntryId TEXT,
       subjectCode TEXT,
       subjectName TEXT,
+      batch TEXT,
       classBatch TEXT,
+      room TEXT,
       date TEXT,
       startTime TEXT,
       endTime TEXT,
       topicTaught TEXT,
+      syllabusUnit TEXT,
       teachingMethod TEXT,
       learningOutcomes TEXT,
+      durationMins INTEGER,
+      remarks TEXT,
+      attendance TEXT,
       totalStudentsPresent INTEGER,
       totalEnrolledStudents INTEGER,
       absentRollNumbers TEXT,
@@ -283,6 +290,22 @@ async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_diary_date ON class_diary(date);
     CREATE INDEX IF NOT EXISTS idx_diary_faculty ON class_diary(facultyId);
   `);
+
+  // Ensure class_diary table has all necessary columns in case of existing SQLite database
+  const extraDiaryCols = [
+    'department TEXT',
+    'batch TEXT',
+    'room TEXT',
+    'syllabusUnit TEXT',
+    'durationMins INTEGER',
+    'remarks TEXT',
+    'attendance TEXT',
+  ];
+  extraDiaryCols.forEach((colDef) => {
+    try {
+      runSql(`ALTER TABLE class_diary ADD COLUMN ${colDef}`);
+    } catch (e) {}
+  });
 
   // Clean database cleanup: Remove legacy mock/dummy seed entries if present
   try {
@@ -1370,12 +1393,42 @@ async function startServer() {
         }
       } catch (e) {}
 
+      let attendance: any[] = [];
+      try {
+        if (typeof r.attendance === 'string' && r.attendance) {
+          attendance = JSON.parse(r.attendance);
+        } else if (Array.isArray(r.attendance)) {
+          attendance = r.attendance;
+        }
+      } catch (e) {}
+
+      const batchVal = r.batch || r.classBatch || '';
+
       return {
         ...r,
+        id: String(r.id),
+        facultyId: r.facultyId || '',
+        facultyName: r.facultyName || '',
+        department: r.department || '',
+        subjectCode: r.subjectCode || '',
+        subjectName: r.subjectName || '',
+        batch: batchVal,
+        classBatch: batchVal,
+        room: r.room || '',
+        date: r.date || '',
+        startTime: r.startTime || '09:00',
+        endTime: r.endTime || '10:00',
+        topicTaught: r.topicTaught || '',
+        syllabusUnit: r.syllabusUnit || '',
+        durationMins: Number(r.durationMins) || 60,
+        remarks: r.remarks || '',
+        attendance,
         absentRollNumbers,
         totalStudentsPresent: Number(r.totalStudentsPresent) || 0,
         totalEnrolledStudents: Number(r.totalEnrolledStudents) || 0,
         classStartTimestamp: Number(r.classStartTimestamp) || 0,
+        createdAt: r.createdAt || new Date().toISOString(),
+        updatedAt: r.updatedAt || new Date().toISOString(),
       };
     });
 
@@ -1392,35 +1445,52 @@ async function startServer() {
     const startTimestamp = entry.classStartTimestamp || new Date(`${entry.date || new Date().toISOString().split('T')[0]}T${entry.startTime || '09:00'}`).getTime();
     const createdAt = entry.createdAt || new Date().toISOString();
     const updatedAt = new Date().toISOString();
+    const batchVal = entry.batch || entry.classBatch || '';
+    const attendanceJson = typeof entry.attendance === 'string' ? entry.attendance : JSON.stringify(entry.attendance || []);
 
     runSql(
       `INSERT OR REPLACE INTO class_diary 
-      (id, facultyId, facultyName, timetableEntryId, subjectCode, subjectName, classBatch, date, startTime, endTime, topicTaught, teachingMethod, learningOutcomes, totalStudentsPresent, totalEnrolledStudents, absentRollNumbers, classStartTimestamp, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, facultyId, facultyName, department, timetableEntryId, subjectCode, subjectName, batch, classBatch, room, date, startTime, endTime, topicTaught, syllabusUnit, teachingMethod, learningOutcomes, durationMins, remarks, attendance, totalStudentsPresent, totalEnrolledStudents, absentRollNumbers, classStartTimestamp, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         entry.facultyId || '',
         entry.facultyName || '',
+        entry.department || '',
         entry.timetableEntryId || '',
         entry.subjectCode || '',
         entry.subjectName || '',
-        entry.classBatch || '',
+        batchVal,
+        batchVal,
+        entry.room || '',
         entry.date || new Date().toISOString().split('T')[0],
         entry.startTime || '09:00',
         entry.endTime || '10:15',
         entry.topicTaught,
+        entry.syllabusUnit || '',
         entry.teachingMethod || 'Lecture',
         entry.learningOutcomes || '',
-        entry.totalStudentsPresent || 0,
-        entry.totalEnrolledStudents || 0,
-        JSON.stringify(entry.absentRollNumbers || []),
+        Number(entry.durationMins) || 60,
+        entry.remarks || '',
+        attendanceJson,
+        entry.totalStudentsPresent || (entry.attendance ? entry.attendance.filter((a: any) => a.status === 'Present').length : 0),
+        entry.totalEnrolledStudents || (entry.attendance ? entry.attendance.length : 0),
+        JSON.stringify(entry.absentRollNumbers || (entry.attendance ? entry.attendance.filter((a: any) => a.status === 'Absent').map((a: any) => a.rollNo) : [])),
         startTimestamp,
         createdAt,
         updatedAt,
       ]
     );
 
-    res.status(201).json({ ...entry, id, classStartTimestamp: startTimestamp, createdAt, updatedAt });
+    res.status(201).json({
+      ...entry,
+      id,
+      batch: batchVal,
+      classBatch: batchVal,
+      classStartTimestamp: startTimestamp,
+      createdAt,
+      updatedAt
+    });
   });
 
   app.put('/api/class-diary/:id', (req, res) => {
@@ -1445,15 +1515,32 @@ async function startServer() {
 
     const body = req.body;
     const updatedAt = new Date().toISOString();
+    const batchVal = body.batch || body.classBatch || existingEntry.batch || existingEntry.classBatch || '';
+    const attendanceJson = typeof body.attendance === 'string' ? body.attendance : JSON.stringify(body.attendance || []);
 
     runSql(
       `UPDATE class_diary SET 
-      topicTaught = ?, teachingMethod = ?, learningOutcomes = ?, totalStudentsPresent = ?, totalEnrolledStudents = ?, absentRollNumbers = ?, updatedAt = ?
+      facultyId = ?, facultyName = ?, department = ?, subjectCode = ?, subjectName = ?, batch = ?, classBatch = ?, room = ?, date = ?, startTime = ?, endTime = ?, topicTaught = ?, syllabusUnit = ?, teachingMethod = ?, learningOutcomes = ?, durationMins = ?, remarks = ?, attendance = ?, totalStudentsPresent = ?, totalEnrolledStudents = ?, absentRollNumbers = ?, updatedAt = ?
       WHERE id = ?`,
       [
+        body.facultyId || existingEntry.facultyId,
+        body.facultyName || existingEntry.facultyName,
+        body.department || existingEntry.department,
+        body.subjectCode || existingEntry.subjectCode,
+        body.subjectName || existingEntry.subjectName,
+        batchVal,
+        batchVal,
+        body.room || existingEntry.room,
+        body.date || existingEntry.date,
+        body.startTime || existingEntry.startTime,
+        body.endTime || existingEntry.endTime,
         body.topicTaught || existingEntry.topicTaught,
+        body.syllabusUnit || existingEntry.syllabusUnit,
         body.teachingMethod || existingEntry.teachingMethod,
         body.learningOutcomes || existingEntry.learningOutcomes,
+        body.durationMins !== undefined ? Number(body.durationMins) : Number(existingEntry.durationMins) || 60,
+        body.remarks !== undefined ? body.remarks : existingEntry.remarks,
+        attendanceJson,
         body.totalStudentsPresent !== undefined ? body.totalStudentsPresent : existingEntry.totalStudentsPresent,
         body.totalEnrolledStudents !== undefined ? body.totalEnrolledStudents : existingEntry.totalEnrolledStudents,
         JSON.stringify(body.absentRollNumbers || []),
@@ -1462,7 +1549,7 @@ async function startServer() {
       ]
     );
 
-    res.json({ ...existingEntry, ...body, updatedAt });
+    res.json({ ...existingEntry, ...body, id, batch: batchVal, classBatch: batchVal, updatedAt });
   });
 
   app.delete('/api/class-diary/:id', (req, res) => {

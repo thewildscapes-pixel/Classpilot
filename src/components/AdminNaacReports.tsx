@@ -30,7 +30,18 @@ export const AdminNaacReports: React.FC<AdminNaacReportsProps> = ({
   facultyList,
   timetable,
 }) => {
-  const [diaryEntries, setDiaryEntries] = useState<ClassDiaryEntry[]>([]);
+  const [diaryEntries, setDiaryEntries] = useState<ClassDiaryEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return [];
+  });
   const [loading, setLoading] = useState<boolean>(true);
 
   // Filters
@@ -52,7 +63,25 @@ export const AdminNaacReports: React.FC<AdminNaacReportsProps> = ({
       const res = await fetch('/api/class-diary');
       if (res.ok) {
         const data = await res.json();
-        setDiaryEntries(data);
+        const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
+        let localList: ClassDiaryEntry[] = [];
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) localList = parsed;
+          } catch (e) {}
+        }
+        const map = new Map<string, ClassDiaryEntry>();
+        localList.forEach((e) => { if (e && e.id) map.set(e.id, e); });
+        if (Array.isArray(data)) {
+          data.forEach((e) => {
+            if (e && e.id) {
+              const prev = map.get(e.id);
+              map.set(e.id, { ...prev, ...e });
+            }
+          });
+        }
+        setDiaryEntries(Array.from(map.values()));
       } else {
         loadFallbackEntries();
       }
@@ -69,25 +98,26 @@ export const AdminNaacReports: React.FC<AdminNaacReportsProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
-          const cleaned = parsed.filter((entry: ClassDiaryEntry) => entry.id !== 'diary_1' && entry.id !== 'diary_2');
-          setDiaryEntries(cleaned);
+          setDiaryEntries(parsed);
           return;
         }
       }
     } catch (err) {}
-
-    setDiaryEntries([]);
   };
 
   // Filter entries
   const filteredEntries = diaryEntries.filter((entry) => {
-    const matchDept = selectedDept === 'All' || entry.department === selectedDept;
+    const matchDept = selectedDept === 'All' || (entry.department || '') === selectedDept;
     const matchFaculty = selectedFacultyId === 'All' || entry.facultyId === selectedFacultyId;
+    const topic = entry.topicTaught || '';
+    const subjectName = entry.subjectName || '';
+    const subjectCode = entry.subjectCode || '';
+    const facultyName = entry.facultyName || '';
     const matchSearch =
-      entry.topicTaught.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.subjectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.subjectCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      entry.facultyName.toLowerCase().includes(searchTerm.toLowerCase());
+      topic.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      subjectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      subjectCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      facultyName.toLowerCase().includes(searchTerm.toLowerCase());
 
     if (!matchDept || !matchFaculty || !matchSearch) return false;
 
