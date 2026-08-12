@@ -409,6 +409,7 @@ export default function App() {
 
   // Central Database Sync Status Indicator ('synced' | 'syncing' | 'offline')
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline'>('syncing');
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
   // Notifications & Alerts
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
@@ -427,53 +428,90 @@ export default function App() {
 
   // Central Database Sync Engine (Fetches directly from central server API)
   const syncCentralDatabase = useCallback(async () => {
+    const timeStr = new Date().toLocaleTimeString();
+    console.log(`[CentralSync @ ${timeStr}] Starting database fetch check...`);
+
+    // 1. Fetch /api/timetable
     try {
       const res = await fetch('/api/timetable');
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) {
           if (data.length > 0) {
+            console.log(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Loaded ${data.length} routine entries.`);
             setTimetable(data);
             try {
               localStorage.setItem('classpilot_timetable', JSON.stringify(data));
             } catch (e) {}
+            setSyncStatus('synced');
+            setLastSyncTime(new Date());
+          } else {
+            console.warn(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Returned EMPTY array (0 records). Preserving existing timetable state.`);
+            setSyncStatus('synced');
+            setLastSyncTime(new Date());
           }
-          setSyncStatus('synced');
+        } else {
+          console.warn(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Returned invalid non-array payload:`, data);
         }
       } else {
+        console.warn(`[CentralSync] Endpoint '/api/timetable': HTTP ${res.status} (${res.statusText}) — Server error or route not present.`);
         setSyncStatus('offline');
       }
-
-      fetch('/api/faculty')
-        .then((r) => r.json())
-        .then((facData) => {
-          if (Array.isArray(facData) && facData.length > 0) {
-            setFacultyList(facData);
-          }
-        })
-        .catch(() => {});
-
-      fetch('/api/rooms')
-        .then((r) => r.json())
-        .then((rmData) => {
-          if (Array.isArray(rmData) && rmData.length > 0) {
-            setRoomList(rmData);
-          }
-        })
-        .catch(() => {});
-
-      fetch('/api/students')
-        .then((r) => r.json())
-        .then((stData) => {
-          if (Array.isArray(stData) && stData.length > 0) {
-            setStudents(stData);
-          }
-        })
-        .catch(() => {});
-    } catch (err) {
-      console.warn('Central Database Sync Error:', err);
+    } catch (err: any) {
+      console.warn(`[CentralSync] Endpoint '/api/timetable' fetch network error: ${err.message || err}`);
       setSyncStatus('offline');
     }
+
+    // 2. Fetch /api/faculty
+    fetch('/api/faculty')
+      .then(async (r) => {
+        if (!r.ok) {
+          console.warn(`[CentralSync] Endpoint '/api/faculty': HTTP ${r.status} (${r.statusText})`);
+          return;
+        }
+        const facData = await r.json();
+        if (Array.isArray(facData) && facData.length > 0) {
+          console.log(`[CentralSync] Endpoint '/api/faculty': HTTP 200 OK — Loaded ${facData.length} faculty members.`);
+          setFacultyList(facData);
+        } else {
+          console.warn(`[CentralSync] Endpoint '/api/faculty': Returned empty or non-array data.`, facData);
+        }
+      })
+      .catch((err) => console.warn(`[CentralSync] Endpoint '/api/faculty' fetch exception: ${err.message || err}`));
+
+    // 3. Fetch /api/rooms
+    fetch('/api/rooms')
+      .then(async (r) => {
+        if (!r.ok) {
+          console.warn(`[CentralSync] Endpoint '/api/rooms': HTTP ${r.status} (${r.statusText})`);
+          return;
+        }
+        const rmData = await r.json();
+        if (Array.isArray(rmData) && rmData.length > 0) {
+          console.log(`[CentralSync] Endpoint '/api/rooms': HTTP 200 OK — Loaded ${rmData.length} rooms.`);
+          setRoomList(rmData);
+        } else {
+          console.warn(`[CentralSync] Endpoint '/api/rooms': Returned empty or non-array data.`, rmData);
+        }
+      })
+      .catch((err) => console.warn(`[CentralSync] Endpoint '/api/rooms' fetch exception: ${err.message || err}`));
+
+    // 4. Fetch /api/students
+    fetch('/api/students')
+      .then(async (r) => {
+        if (!r.ok) {
+          console.warn(`[CentralSync] Endpoint '/api/students': HTTP ${r.status} (${r.statusText})`);
+          return;
+        }
+        const stData = await r.json();
+        if (Array.isArray(stData) && stData.length > 0) {
+          console.log(`[CentralSync] Endpoint '/api/students': HTTP 200 OK — Loaded ${stData.length} student records.`);
+          setStudents(stData);
+        } else {
+          console.warn(`[CentralSync] Endpoint '/api/students': Returned empty or non-array data.`, stData);
+        }
+      })
+      .catch((err) => console.warn(`[CentralSync] Endpoint '/api/students' fetch exception: ${err.message || err}`));
   }, []);
 
   // --- FETCH CENTRAL BACKEND DATA ON MOUNT & REALTIME FIRESTORE TIMETABLE ---
@@ -489,22 +527,24 @@ export default function App() {
     // Firestore Real-Time Timetable Listener
     const unsubscribeTimetable = subscribeToTimetableRealtime((entries) => {
       if (Array.isArray(entries) && entries.length > 0) {
+        console.log(`[FirestoreRealtime] Listener received ${entries.length} routine records from Cloud Firestore.`);
         setTimetable(entries);
         setSyncStatus('synced');
+        setLastSyncTime(new Date());
         try {
           localStorage.setItem('classpilot_timetable', JSON.stringify(entries));
         } catch (e) {}
         checkAndTriggerAutomatedDailyBackup(entries).catch((err) =>
           console.warn('Auto backup trigger notice:', err)
         );
-        // Sync to Express SQLite server
+        // Best-effort sync to Express SQLite server
         fetch('/api/timetable/import', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ entries, replaceExisting: true }),
         }).catch((e) => {});
       } else {
-        // If Firestore emits empty or fails, fall back cleanly to central server API
+        console.warn(`[FirestoreRealtime] Listener returned empty snapshot or 0 entries. Triggering syncCentralDatabase fallback...`);
         syncCentralDatabase();
       }
     });
@@ -976,39 +1016,38 @@ export default function App() {
 
     const newFullRoutine = replaceExisting ? completeEntries : [...timetable, ...completeEntries];
 
-    // 3. Write to Central Express Server Database and await resolution
+    // 3. Update primary local state and persistent storage
+    setTimetable(newFullRoutine);
     try {
-      const apiRes = await fetch('/api/timetable/import', {
+      localStorage.setItem('classpilot_timetable', JSON.stringify(newFullRoutine));
+    } catch (e) {}
+
+    // 4. Primary Cloud Database Write (Firestore Realtime)
+    const fsResult = await saveTimetableToFirestore(newFullRoutine, replaceExisting).catch((err) => ({
+      success: false,
+      count: 0,
+      error: err?.message || 'Firestore write error',
+    }));
+
+    if (fsResult.success) {
+      setSyncStatus('synced');
+      setLastSyncTime(new Date());
+    } else {
+      console.warn('Firestore timetable sync warning (saved locally in browser storage):', fsResult.error);
+    }
+
+    // 5. Best-effort sync to optional Express server endpoint (if available in container environment)
+    try {
+      await fetch('/api/timetable/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries: completeEntries, replaceExisting }),
       });
-      if (!apiRes.ok) {
-        const errData = await apiRes.json().catch(() => ({}));
-        return {
-          success: false,
-          error: errData.error || `Server HTTP error ${apiRes.status} writing to database`,
-        };
-      }
     } catch (e: any) {
-      console.error('Backend API import sync error:', e);
-      return {
-        success: false,
-        error: `Failed to save to central database: ${e.message || e}`,
-      };
+      console.warn('Optional Express server API sync notice (running on static host/Vercel):', e);
     }
 
-    // 4. Write to Cloud Firestore Database with await and error handling
-    const fsResult = await saveTimetableToFirestore(newFullRoutine, replaceExisting);
-    if (!fsResult.success) {
-      console.error('Firestore timetable batch write error:', fsResult.error);
-      return {
-        success: false,
-        error: `Firestore database write failed: ${fsResult.error || 'Unknown database error'}`,
-      };
-    }
-
-    // 5. Store routine version log & backup snapshot in Firestore
+    // 6. Store routine version log & backup snapshot in Firestore
     if (replaceExisting && timetable.length > 0) {
       await createRoutineBackupInFirestore({
         id: `bkp_pre_import_${Date.now()}`,
@@ -1049,12 +1088,6 @@ export default function App() {
       rawFileName: rawFileData?.fileName,
       entriesSnapshot: newFullRoutine,
     }).catch((e) => console.warn('Version history log notice:', e));
-
-    // 6. UI state setTimetable is ONLY triggered after successful database promise resolution!
-    setTimetable(newFullRoutine);
-    try {
-      localStorage.setItem('classpilot_timetable', JSON.stringify(newFullRoutine));
-    } catch (e) {}
 
     return { success: true, count: completeEntries.length };
   };
@@ -1306,6 +1339,7 @@ export default function App() {
         onOpenInstallModal={() => setIsPwaModalOpen(true)}
         unreadCount={unreadAlertsCount}
         syncStatus={syncStatus}
+        lastSyncTime={lastSyncTime}
         timetableCount={timetable.length}
         onManualSync={syncCentralDatabase}
       />

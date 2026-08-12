@@ -16,6 +16,7 @@ interface HeaderProps {
   onOpenInstallModal: () => void;
   unreadCount: number;
   syncStatus?: 'synced' | 'syncing' | 'offline';
+  lastSyncTime?: Date | string | null;
   timetableCount?: number;
   onManualSync?: () => void;
 }
@@ -34,9 +35,15 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenInstallModal,
   unreadCount,
   syncStatus = 'synced',
+  lastSyncTime,
   timetableCount = 0,
   onManualSync,
 }) => {
+  const formattedSyncTime = lastSyncTime
+    ? typeof lastSyncTime === 'string'
+      ? lastSyncTime
+      : lastSyncTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
   const isSuperAdmin = currentUser && (
     currentUser.email?.toLowerCase().trim() === 'thewildscapes@gmail.com' ||
     (currentUser.whatsappPhone || '').replace(/\D/g, '').endsWith('9706375001')
@@ -139,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Live Central Database Sync Status Pill */}
             <button
               onClick={onManualSync}
-              title="Click to sync live database with central cloud server"
+              title={`Database Sync Status: ${syncStatus.toUpperCase()}${formattedSyncTime ? ` | Last successful sync: ${formattedSyncTime}` : ''} (Click to re-sync)`}
               className={`p-1.5 px-2.5 rounded-xl border text-xs font-medium transition-all flex items-center space-x-1.5 shadow-sm ${
                 syncStatus === 'synced'
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
@@ -149,10 +156,17 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <Database className={`w-3.5 h-3.5 ${syncStatus === 'synced' ? 'text-emerald-400' : syncStatus === 'syncing' ? 'text-amber-400 animate-spin' : 'text-rose-400'}`} />
-              <span className="hidden sm:inline text-[11px] font-semibold">
-                {syncStatus === 'synced' ? `Synced • ${timetableCount}` : syncStatus === 'syncing' ? 'Syncing DB...' : 'Offline Mode'}
-              </span>
-              <RefreshCw className="w-3 h-3 opacity-60 hover:opacity-100 hidden sm:inline" />
+              <div className="hidden sm:flex flex-col items-start leading-none">
+                <span className="text-[11px] font-semibold">
+                  {syncStatus === 'synced' ? `Synced • ${timetableCount}` : syncStatus === 'syncing' ? 'Syncing DB...' : 'Offline Mode'}
+                </span>
+                {formattedSyncTime && (
+                  <span className="text-[9px] text-slate-400 font-normal mt-0.5">
+                    Last: {formattedSyncTime}
+                  </span>
+                )}
+              </div>
+              <RefreshCw className="w-3 h-3 opacity-60 hover:opacity-100 hidden sm:inline ml-0.5" />
             </button>
             {/* Notification Permission Toggle */}
             <button

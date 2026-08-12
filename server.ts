@@ -58,8 +58,11 @@ function saveDbToDisk() {
       fs.mkdirSync(dataDir, { recursive: true });
     }
     const data = db.export();
+    if (!data || data.length === 0) return;
     const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
+    const tmpPath = `${dbPath}.tmp_${Date.now()}`;
+    fs.writeFileSync(tmpPath, buffer);
+    fs.renameSync(tmpPath, dbPath);
   } catch (err) {
     console.error('Failed to save SQLite database to disk:', err);
   }
@@ -96,16 +99,28 @@ function runSql(sql: string, params: any[] = []): void {
 
 async function initDatabase() {
   const SQL = await initSqlJs();
+  let loaded = false;
+
   if (fs.existsSync(dbPath)) {
     try {
       const fileBuffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(fileBuffer);
-      console.log('✅ Persistent SQLite database loaded successfully from:', dbPath);
+      if (fileBuffer && fileBuffer.length > 0) {
+        const testDb = new SQL.Database(fileBuffer);
+        testDb.exec('PRAGMA quick_check;');
+        testDb.exec('SELECT count(*) FROM sqlite_master;');
+        db = testDb;
+        console.log('✅ Persistent SQLite database loaded and verified successfully from:', dbPath);
+        loaded = true;
+      }
     } catch (e) {
-      console.warn('⚠️ Could not load existing SQLite file, creating new database instance:', e);
-      db = new SQL.Database();
+      console.warn('⚠️ Existing SQLite database file is invalid or corrupted. Starting fresh:', e);
+      try {
+        fs.unlinkSync(dbPath);
+      } catch (unlinkErr) {}
     }
-  } else {
+  }
+
+  if (!loaded) {
     db = new SQL.Database();
     console.log('✨ Created new persistent SQLite database instance.');
   }
