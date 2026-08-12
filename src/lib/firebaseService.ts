@@ -286,6 +286,61 @@ export function subscribeToTimetableRealtime(callback: (entries: TimetableEntry[
 }
 
 /**
+ * One-time direct fetch of all timetable entries from Firestore
+ */
+export async function getTimetableFromFirestore(): Promise<TimetableEntry[]> {
+  try {
+    const snapshot = await getDocs(collection(db, 'timetables'));
+    const entries: TimetableEntry[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      let formattedSyncTime = '';
+      if (data.updatedAt) {
+        if (typeof data.updatedAt.toDate === 'function') {
+          formattedSyncTime = data.updatedAt.toDate().toISOString();
+        } else if (typeof data.updatedAt === 'string') {
+          formattedSyncTime = data.updatedAt;
+        } else if (typeof data.updatedAt === 'number') {
+          formattedSyncTime = new Date(data.updatedAt).toISOString();
+        }
+      }
+      if (!formattedSyncTime && data.lastSyncedAt) {
+        if (typeof data.lastSyncedAt === 'string') {
+          formattedSyncTime = data.lastSyncedAt;
+        } else if (typeof data.lastSyncedAt === 'number') {
+          formattedSyncTime = new Date(data.lastSyncedAt).toISOString();
+        }
+      }
+
+      entries.push({
+        id: docSnap.id,
+        facultyId: data.facultyId || '',
+        facultyName: data.facultyName || '',
+        subjectCode: data.subjectCode || '',
+        subjectName: data.subjectName || '',
+        room: data.room || data.roomNo || '',
+        day: data.day || 'Monday',
+        startTime: data.startTime || '',
+        endTime: data.endTime || '',
+        batch: data.batch || '',
+        department: data.department || '',
+        semesterCycle: data.semesterCycle || 'Odd',
+        programSemester: data.programSemester || 'FYUGP 1st Semester',
+        paperCategory: data.paperCategory || 'Major',
+        notes: data.notes || '',
+        isSubstitute: data.isSubstitute || false,
+        updatedAt: formattedSyncTime || data.updatedAt || undefined,
+        lastSyncedAt: formattedSyncTime || data.lastSyncedAt || undefined,
+      });
+    });
+    return entries;
+  } catch (err) {
+    console.warn('[getTimetableFromFirestore] Exception:', err);
+    return [];
+  }
+}
+
+/**
  * Save / Upload Timetable batch to Firestore (Admin function).
  * Ensures one document per class period for proper querying and faculty schedule views.
  */

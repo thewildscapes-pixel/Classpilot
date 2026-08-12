@@ -57,16 +57,23 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Firestore with default or custom database ID and memoryLocalCache
+const targetDbId = firebaseConfig.firestoreDatabaseId || '(default)';
+
 let firestoreInstance;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
       localCache: memoryLocalCache(),
-    }
+    },
+    targetDbId
   );
 } catch (e) {
-  firestoreInstance = getFirestore(app);
+  try {
+    firestoreInstance = getFirestore(app, targetDbId);
+  } catch (e2) {
+    firestoreInstance = getFirestore(app);
+  }
 }
 
 export const db = firestoreInstance;

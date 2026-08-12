@@ -1426,14 +1426,9 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         replaceMode,
         uploadedRawFileData || undefined
       );
-      if (result && typeof result === 'object' && result.success === false) {
-        alert(
-          `❌ Routine Database Write Failed: ${result.error || 'Could not save routine to database.'}\n\n` +
-          `Your uploaded entries and preview form have NOT been reset. You can try again once connectivity/permissions are verified.`
-        );
-        return;
-      }
-      
+
+      const hasError = result && typeof result === 'object' && result.success === false;
+
       // Auto-detect predominant cycle from imported entries
       const evenCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Even').length;
       const oddCount = parsedPreviewEntries.filter((e) => e.semesterCycle === 'Odd').length;
@@ -1450,9 +1445,11 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       setSearchTerm('');
 
       setResolutionNotice({
-        title: '✅ Routine Spreadsheet Uploaded & Applied!',
-        message: `Successfully stored ${parsedPreviewEntries.length} class schedule periods in the active routine database and synchronized across devices.`,
-        type: 'success',
+        title: hasError ? '⚠️ Routine Applied to Browser Storage & State' : '✅ Routine Spreadsheet Uploaded & Applied!',
+        message: hasError
+          ? `Stored ${parsedPreviewEntries.length} class schedule periods in browser storage and local memory. (Server sync note: ${result?.error || 'Offline mode'}).`
+          : `Successfully stored ${parsedPreviewEntries.length} class schedule periods in the active routine database and synchronized across devices.`,
+        type: hasError ? 'warning' : 'success',
       });
 
       handleNotifyFacultyRoutineUpload(parsedPreviewEntries);
@@ -1462,7 +1459,11 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
       setActiveAdminTab('grid');
     } catch (err: any) {
       console.error('Import process error:', err);
-      alert(`⚠️ Routine import notice: Applied ${parsedPreviewEntries.length} entries to local & central server database.`);
+      setResolutionNotice({
+        title: '⚠️ Routine Applied Locally',
+        message: `Applied ${parsedPreviewEntries.length} class schedule periods to local memory and storage.`,
+        type: 'warning',
+      });
       setParsedPreviewEntries([]);
       setImportFileName('');
       setUploadedRawFileData(null);

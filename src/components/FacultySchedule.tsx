@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TimetableEntry, Faculty, DayOfWeek, User, Student } from '../types';
 import { DAYS_OF_WEEK, getEntryStatus, parseTimeToMinutes, formatMinutesTo12H, getCurrentDayName, isFacultyNameMatch, isPhoneMatch } from '../utils/timeUtils';
 import { ClassQrAttendanceModal } from './ClassQrAttendanceModal';
@@ -113,17 +113,43 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     return d.trim();
   };
 
+  // Combine registered facultyList with unique faculty profiles present in imported timetable
+  const allAvailableFacultyList = useMemo(() => {
+    const list: Faculty[] = [...facultyList];
+    const existingKeys = new Set(list.map((f) => f.name.toLowerCase().replace(/[^a-z0-9]/g, '')));
+
+    timetable.forEach((entry) => {
+      if (!entry.facultyName || entry.facultyName === 'Unassigned' || entry.facultyName === 'Faculty Member') return;
+      const key = entry.facultyName.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (key && !existingKeys.has(key)) {
+        existingKeys.add(key);
+        list.push({
+          id: entry.facultyId || `fac_${key}`,
+          name: entry.facultyName,
+          email: '',
+          department: entry.department || 'Commerce',
+          designation: 'Faculty Member',
+          phone: '',
+          whatsappPhone: '',
+          isVerified: true,
+        });
+      }
+    });
+
+    return list;
+  }, [facultyList, timetable]);
+
   // Determine current active faculty object
   const currentFaculty: Faculty =
-    facultyList.find((f) => f.id === selectedFacultyId) ||
-    facultyList.find(
+    allAvailableFacultyList.find((f) => f.id === selectedFacultyId) ||
+    allAvailableFacultyList.find((f) => isFacultyNameMatch(f.name, selectedFacultyId)) ||
+    allAvailableFacultyList.find(
       (f) =>
         currentUser &&
         (f.id === currentUser.facultyId ||
           (f.email && currentUser.email && f.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
           isPhoneMatch(f.phone, currentUser.phone) ||
           isPhoneMatch(f.whatsappPhone, currentUser.phone) ||
-          isPhoneMatch(f.phone, currentUser.whatsappPhone) ||
           isFacultyNameMatch(f.name, currentUser.name))
     ) ||
     (currentUser
@@ -137,7 +163,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
           whatsappPhone: currentUser.phone || currentUser.whatsappPhone || '',
           isVerified: true,
         }
-      : facultyList[0]);
+      : allAvailableFacultyList[0]);
 
   // Check if viewing logged-in user's own schedule or another faculty's
   const isViewingOwnSchedule = Boolean(
@@ -161,44 +187,33 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     setViewMode('daily');
   };
 
-  // Filter timetable entries strictly for active target faculty
-  const allFacultyEntries = timetable.filter((e) => {
-    // If logged-in user is a faculty member (non-admin), strictly scope to their identity
-    if (currentUser && currentUser.role === 'faculty') {
-      if (currentUser.facultyId && e.facultyId === currentUser.facultyId) return true;
-      if (currentUser.employeeId && e.facultyId === currentUser.employeeId) return true;
-      if (currentUser.name && isFacultyNameMatch(e.facultyName, currentUser.name)) return true;
-      if (currentUser.email && e.facultyName && e.facultyName.toLowerCase().includes(currentUser.email.split('@')[0].toLowerCase())) return true;
+  // Filter timetable entries for selected target faculty or all routines
+  const allFacultyEntries = useMemo(() => {
+    if (!timetable || timetable.length === 0) return [];
 
-      // Match via phone / email / ID linkage in facultyList
-      const matchedFacInList = facultyList.find(
-        (f) => f.id === e.facultyId || isFacultyNameMatch(f.name, e.facultyName)
-      );
-      if (
-        matchedFacInList &&
-        (matchedFacInList.id === currentUser.facultyId ||
-          (matchedFacInList.email && currentUser.email && matchedFacInList.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
-          isPhoneMatch(matchedFacInList.phone, currentUser.phone) ||
-          isPhoneMatch(matchedFacInList.whatsappPhone, currentUser.phone) ||
-          isPhoneMatch(matchedFacInList.phone, currentUser.whatsappPhone) ||
-          isFacultyNameMatch(matchedFacInList.name, currentUser.name))
-      ) {
-        return true;
-      }
+    // Allow viewing all routines across institution
+    if (selectedFacultyId === 'all') {
+      return timetable;
+    }
+
+    // Target faculty matching
+    const targetFac =
+      allAvailableFacultyList.find((f) => f.id === selectedFacultyId) ||
+      allAvailableFacultyList.find((f) => isFacultyNameMatch(f.name, selectedFacultyId)) ||
+      currentFaculty;
+
+    if (!targetFac && !selectedFacultyId) {
+      return timetable;
+    }
+
+    return timetable.filter((e) => {
+      if (selectedFacultyId && e.facultyId === selectedFacultyId) return true;
+      if (targetFac && targetFac.id && e.facultyId === targetFac.id) return true;
+      if (targetFac && targetFac.name && isFacultyNameMatch(e.facultyName, targetFac.name)) return true;
+      if (targetFac && targetFac.email && e.facultyName && e.facultyName.toLowerCase().includes(targetFac.email.split('@')[0].toLowerCase())) return true;
       return false;
-    }
-
-    // For Admin user, match by selected faculty dropdown ID or selected faculty object
-    if (selectedFacultyId && e.facultyId === selectedFacultyId) return true;
-
-    if (currentFaculty) {
-      if (e.facultyId && e.facultyId === currentFaculty.id) return true;
-      if (e.facultyName && isFacultyNameMatch(e.facultyName, currentFaculty.name)) return true;
-      if (currentFaculty.email && e.facultyName && e.facultyName.toLowerCase().includes(currentFaculty.email.split('@')[0].toLowerCase())) return true;
-    }
-
-    return false;
-  });
+    });
+  }, [timetable, selectedFacultyId, allAvailableFacultyList, currentFaculty]);
 
   // Filter single day entries with normalized day comparison
   const targetDayNorm = normalizeDay(selectedDay);
@@ -394,9 +409,12 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                 onChange={(e) => onSelectFaculty(e.target.value)}
                 className="w-full bg-slate-900 text-white font-semibold text-sm sm:text-base rounded-xl px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
-                {facultyList.map((fac) => (
+                <option value="all" className="bg-slate-900 text-amber-400 font-bold">
+                  📋 All Faculty Master Routine ({timetable.length} classes)
+                </option>
+                {allAvailableFacultyList.map((fac) => (
                   <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
-                    {fac.name} ({fac.department})
+                    {fac.name} ({fac.department || 'General'})
                   </option>
                 ))}
               </select>

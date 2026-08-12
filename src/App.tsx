@@ -30,6 +30,7 @@ import {
 import { playAlertChime, playSchoolBellSound, stopSchoolBellSound } from './utils/audioUtils';
 import {
   subscribeToTimetableRealtime,
+  getTimetableFromFirestore,
   saveTimetableToFirestore,
   addTimetableEntryToFirestore,
   updateTimetableEntryInFirestore,
@@ -431,35 +432,42 @@ export default function App() {
     const timeStr = new Date().toLocaleTimeString();
     console.log(`[CentralSync @ ${timeStr}] Starting database fetch check...`);
 
-    // 1. Fetch /api/timetable
+    // 1. Fetch /api/timetable with Cloud Firestore fallback
+    let fetched = false;
     try {
       const res = await fetch('/api/timetable');
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data)) {
-          if (data.length > 0) {
-            console.log(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Loaded ${data.length} routine entries.`);
-            setTimetable(data);
-            try {
-              localStorage.setItem('classpilot_timetable', JSON.stringify(data));
-            } catch (e) {}
-            setSyncStatus('synced');
-            setLastSyncTime(new Date());
-          } else {
-            console.warn(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Returned EMPTY array (0 records). Preserving existing timetable state.`);
-            setSyncStatus('synced');
-            setLastSyncTime(new Date());
-          }
-        } else {
-          console.warn(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Returned invalid non-array payload:`, data);
+        if (Array.isArray(data) && data.length > 0) {
+          console.log(`[CentralSync] Endpoint '/api/timetable': HTTP 200 OK — Loaded ${data.length} routine entries.`);
+          setTimetable(data);
+          try {
+            localStorage.setItem('classpilot_timetable', JSON.stringify(data));
+          } catch (e) {}
+          setSyncStatus('synced');
+          setLastSyncTime(new Date());
+          fetched = true;
         }
-      } else {
-        console.warn(`[CentralSync] Endpoint '/api/timetable': HTTP ${res.status} (${res.statusText}) — Server error or route not present.`);
-        setSyncStatus('offline');
       }
     } catch (err: any) {
-      console.warn(`[CentralSync] Endpoint '/api/timetable' fetch network error: ${err.message || err}`);
-      setSyncStatus('offline');
+      console.warn(`[CentralSync] Endpoint '/api/timetable' fetch network note: ${err.message || err}`);
+    }
+
+    if (!fetched) {
+      try {
+        const fsEntries = await getTimetableFromFirestore();
+        if (Array.isArray(fsEntries) && fsEntries.length > 0) {
+          console.log(`[CentralSync] Cloud Firestore fallback — Loaded ${fsEntries.length} routine entries.`);
+          setTimetable(fsEntries);
+          try {
+            localStorage.setItem('classpilot_timetable', JSON.stringify(fsEntries));
+          } catch (e) {}
+          setSyncStatus('synced');
+          setLastSyncTime(new Date());
+        }
+      } catch (e) {
+        console.warn('[CentralSync] Firestore fallback note:', e);
+      }
     }
 
     // 2. Fetch /api/faculty
