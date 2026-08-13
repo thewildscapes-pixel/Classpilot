@@ -120,6 +120,85 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const [isQREnrollmentModalOpen, setIsQREnrollmentModalOpen] = useState<boolean>(false);
   const [qrEnrollmentClassBatch, setQrEnrollmentClassBatch] = useState<string>('FYUGP 1st Sem Commerce');
 
+  // Add Manual Class Routine Entry Modal State
+  const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [addForm, setAddForm] = useState<{
+    subjectName: string;
+    subjectCode: string;
+    room: string;
+    startTime: string;
+    endTime: string;
+    day: DayOfWeek;
+    batch: string;
+    department: string;
+    paperCategory: string;
+    facultyName: string;
+    notes: string;
+    isSubstitute: boolean;
+  }>({
+    subjectName: '',
+    subjectCode: '',
+    room: '',
+    startTime: '09:00',
+    endTime: '10:00',
+    day: 'Monday',
+    batch: 'FYUGP 1st Sem Commerce',
+    department: 'Commerce',
+    paperCategory: 'Major',
+    facultyName: '',
+    notes: '',
+    isSubstitute: false,
+  });
+
+  const handleOpenAddModal = (targetDay?: DayOfWeek) => {
+    setAddForm({
+      subjectName: '',
+      subjectCode: '',
+      room: '',
+      startTime: '09:00',
+      endTime: '10:00',
+      day: targetDay || selectedDay || 'Monday',
+      batch: 'FYUGP 1st Sem Commerce',
+      department: currentFaculty?.department || currentUser?.department || 'Commerce',
+      paperCategory: 'Major',
+      facultyName: currentFaculty?.name || currentUser?.name || 'Faculty Member',
+      notes: '',
+      isSubstitute: false,
+    });
+    setIsAddModalOpen(true);
+  };
+
+  const handleSaveAddModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addForm.subjectName.trim() || !addForm.subjectCode.trim()) {
+      alert('Please enter a valid Subject Name and Subject Code.');
+      return;
+    }
+
+    const newEntry: Omit<TimetableEntry, 'id'> = {
+      facultyId: currentFaculty?.id || currentUser?.facultyId || currentUser?.id || `fac_${Date.now()}`,
+      facultyName: addForm.facultyName.trim() || currentFaculty?.name || currentUser?.name || 'Faculty Member',
+      subjectName: addForm.subjectName.trim(),
+      subjectCode: addForm.subjectCode.trim(),
+      room: addForm.room.trim() || 'Room C1',
+      day: addForm.day,
+      startTime: addForm.startTime,
+      endTime: addForm.endTime,
+      batch: addForm.batch.trim() || 'FYUGP',
+      department: addForm.department.trim() || 'Commerce',
+      paperCategory: addForm.paperCategory,
+      notes: addForm.notes.trim(),
+      isSubstitute: addForm.isSubstitute,
+      semesterCycle: 'Odd',
+      programSemester: addForm.batch.trim() || 'FYUGP 1st Semester',
+    };
+
+    if (onAddEntry) {
+      onAddEntry(newEntry);
+    }
+    setIsAddModalOpen(false);
+  };
+
   // Edit Class Routine Entry Modal State
   const [editingEntry, setEditingEntry] = useState<TimetableEntry | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -620,6 +699,16 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
               </button>
             </div>
 
+            {/* Add Manual Class Routine Button */}
+            <button
+              onClick={() => handleOpenAddModal()}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/30 flex items-center space-x-1.5 shrink-0 transition-all cursor-pointer"
+              title="Manually enter a new class routine entry for your schedule"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Add Manual Class</span>
+            </button>
+
             {/* Print / Export Personal Timetable PDF */}
             <button
               onClick={handleExportWeeklyPdf}
@@ -811,13 +900,20 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
           )}
 
           {/* Timeline Header */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <h3 className="font-heading font-bold text-lg text-white flex items-center space-x-2">
               <span>{selectedDay}&apos;s Class Schedule & Timeline</span>
               <span className="text-xs text-slate-400 font-normal">
                 ({dayEntries.length} {dayEntries.length === 1 ? 'lecture' : 'lectures'})
               </span>
             </h3>
+            <button
+              onClick={() => handleOpenAddModal(selectedDay)}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center space-x-1.5 transition-all cursor-pointer self-start sm:self-auto"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Class to {selectedDay}</span>
+            </button>
           </div>
 
           {dayEntries.length === 0 ? (
@@ -829,8 +925,17 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                 No classes scheduled for {currentFaculty?.name} on {selectedDay}.
               </p>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Select a different day above or switch to <strong className="text-blue-400">This Week</strong> view to see full workload.
+                Select a different day above or enter your class routine manually below.
               </p>
+              <div>
+                <button
+                  onClick={() => handleOpenAddModal(selectedDay)}
+                  className="mt-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md shadow-emerald-600/30 inline-flex items-center space-x-1.5 cursor-pointer transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Create Manual Class Routine for {selectedDay}</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
@@ -1061,10 +1166,19 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
               </div>
 
               <button
-                onClick={handleExportWeeklyPdf}
-                className="px-3.5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 flex items-center space-x-1.5 transition-all cursor-pointer"
+                onClick={() => handleOpenAddModal()}
+                className="px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/30 flex items-center space-x-1.5 transition-all cursor-pointer"
+                title="Manually add a class to your weekly schedule"
               >
-                <Printer className="w-4 h-4" />
+                <Plus className="w-4 h-4" />
+                <span>+ Add Class</span>
+              </button>
+
+              <button
+                onClick={handleExportWeeklyPdf}
+                className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 flex items-center space-x-1.5 transition-all cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-blue-400" />
                 <span>Print Timetable</span>
               </button>
             </div>
@@ -1104,26 +1218,45 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                       onSelectDay(day);
                       setViewMode('daily');
                     }}
-                    className={`p-3.5 border-b flex items-center justify-between cursor-pointer transition-colors ${
+                    className={`p-3 border-b flex items-center justify-between cursor-pointer transition-colors ${
                       isToday
                         ? 'bg-blue-600/20 border-blue-500/40 text-blue-300'
                         : 'bg-slate-800/60 border-slate-800 text-slate-300 hover:bg-slate-800'
                     }`}
                   >
-                    <div className="flex items-center space-x-2">
-                      <Calendar className="w-4 h-4 text-blue-400" />
-                      <span className="font-heading font-extrabold text-sm">{day}</span>
+                    <div className="flex items-center space-x-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                      <span className="font-heading font-extrabold text-xs sm:text-sm">{day}</span>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-950/80 border border-slate-700 text-slate-300">
-                      {entriesForDay.length}
-                    </span>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenAddModal(day);
+                        }}
+                        className="p-1 hover:bg-emerald-600/30 text-emerald-400 hover:text-white rounded-lg transition"
+                        title={`Add new class to ${day}`}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-slate-950/80 border border-slate-700 text-slate-300">
+                        {entriesForDay.length}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Day Lectures List */}
                   <div className="p-3 space-y-3 flex-1">
                     {entriesForDay.length === 0 ? (
-                      <div className="py-8 text-center text-slate-500 text-xs italic">
-                        No lectures
+                      <div className="py-8 text-center space-y-2">
+                        <div className="text-slate-500 text-xs italic">No lectures</div>
+                        <button
+                          onClick={() => handleOpenAddModal(day)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 hover:text-white text-emerald-400 text-[11px] font-semibold rounded-lg border border-slate-700 transition inline-flex items-center space-x-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add Class</span>
+                        </button>
                       </div>
                     ) : (
                       entriesForDay.map((entry) => {
@@ -1285,6 +1418,211 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
         currentUser={currentUser}
         defaultClassBatch={qrEnrollmentClassBatch}
       />
+
+      {/* Add Manual Class Routine Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-5 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600/30 border border-emerald-500/50 flex items-center justify-center text-emerald-400">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-extrabold text-base text-white">Add Manual Class Routine</h3>
+                  <p className="text-[11px] text-slate-400">Enter new class details for {addForm.day}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAddModal} className="space-y-4 text-xs">
+              {/* Subject Name & Subject Code */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Subject / Course Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addForm.subjectName}
+                    onChange={(e) => setAddForm({ ...addForm, subjectName: e.target.value })}
+                    placeholder="e.g. Microeconomics"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Subject / Paper Code *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addForm.subjectCode}
+                    onChange={(e) => setAddForm({ ...addForm, subjectCode: e.target.value })}
+                    placeholder="e.g. ECO-101"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Day, Start Time, End Time */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Day of Week *</label>
+                  <select
+                    value={addForm.day}
+                    onChange={(e) => setAddForm({ ...addForm, day: e.target.value as DayOfWeek })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    {DAYS_OF_WEEK.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Start Time *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addForm.startTime}
+                    onChange={(e) => setAddForm({ ...addForm, startTime: e.target.value })}
+                    placeholder="09:00"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">End Time *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addForm.endTime}
+                    onChange={(e) => setAddForm({ ...addForm, endTime: e.target.value })}
+                    placeholder="10:00"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Room & Class / Batch */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Room / Venue *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addForm.room}
+                    onChange={(e) => setAddForm({ ...addForm, room: e.target.value })}
+                    placeholder="e.g. Room No. C1"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Batch / Class / Section *</label>
+                  <input
+                    type="text"
+                    required
+                    value={addForm.batch}
+                    onChange={(e) => setAddForm({ ...addForm, batch: e.target.value })}
+                    placeholder="e.g. FYUGP 1st Sem Commerce"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Department & Paper Category */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Department</label>
+                  <input
+                    type="text"
+                    value={addForm.department}
+                    onChange={(e) => setAddForm({ ...addForm, department: e.target.value })}
+                    placeholder="e.g. Commerce"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-bold mb-1">Paper Category</label>
+                  <select
+                    value={addForm.paperCategory}
+                    onChange={(e) => setAddForm({ ...addForm, paperCategory: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="Major">Major Core</option>
+                    <option value="Minor">Minor</option>
+                    <option value="MDC">MDC</option>
+                    <option value="SEC">SEC</option>
+                    <option value="VAC">VAC</option>
+                    <option value="AEC">AEC</option>
+                    <option value="HS Core">HS Core</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Teacher Name */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">Assigned Teacher / Faculty</label>
+                <input
+                  type="text"
+                  value={addForm.facultyName}
+                  onChange={(e) => setAddForm({ ...addForm, facultyName: e.target.value })}
+                  placeholder="e.g. Dr. Deborshee Gogoi"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Notes & Substitute Checkbox */}
+              <div>
+                <label className="block text-slate-300 font-bold mb-1">Notes / Instructions</label>
+                <input
+                  type="text"
+                  value={addForm.notes}
+                  onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+                  placeholder="Optional class instructions or topic notes"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="addSubstituteCheck"
+                  checked={addForm.isSubstitute}
+                  onChange={(e) => setAddForm({ ...addForm, isSubstitute: e.target.checked })}
+                  className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-950 border-slate-700"
+                />
+                <label htmlFor="addSubstituteCheck" className="text-amber-300 font-bold cursor-pointer select-none">
+                  Mark as Substitute / Replacement Class
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1.5 transition cursor-pointer shadow-lg shadow-emerald-600/30"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Class Routine</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Edit Class Routine Entry Modal */}
       {editingEntry && (
