@@ -19,6 +19,7 @@ interface HeaderProps {
   lastSyncTime?: Date | string | null;
   timetableCount?: number;
   onManualSync?: () => void;
+  onOpenSleepAlarmModal?: () => void;
 }
 
 
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   lastSyncTime,
   timetableCount = 0,
   onManualSync,
+  onOpenSleepAlarmModal,
 }) => {
   const formattedSyncTime = lastSyncTime
     ? typeof lastSyncTime === 'string'
@@ -168,6 +170,18 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <RefreshCw className="w-3 h-3 opacity-60 hover:opacity-100 hidden sm:inline ml-0.5" />
             </button>
+            {/* Sleep Mode Mobile Alarm Sync Button */}
+            {onOpenSleepAlarmModal && (
+              <button
+                onClick={onOpenSleepAlarmModal}
+                title="Configure Class Warning Bell & Mobile Sleep Mode Alarms"
+                className="p-2 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer"
+              >
+                <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
+                <span className="hidden sm:inline text-xs font-bold">Sleep Alarms</span>
+              </button>
+            )}
+
             {/* Notification Permission Toggle */}
             <button
               onClick={onToggleNotifications}

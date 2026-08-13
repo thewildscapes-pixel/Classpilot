@@ -19,6 +19,7 @@ interface GoogleCalendarViewProps {
   currentUser: User;
   timetable: TimetableEntry[];
   onTriggerAlarm?: (eventTitle: string, room: string, startTime: string) => void;
+  onOpenSleepAlarmModal?: () => void;
 }
 
 const DEFAULT_EVENTS: CalendarEvent[] = [
@@ -61,6 +62,7 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
   currentUser,
   timetable,
   onTriggerAlarm,
+  onOpenSleepAlarmModal,
 }) => {
   const [events, setEvents] = useState<CalendarEvent[]>(() => {
     try {
@@ -165,10 +167,20 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {onOpenSleepAlarmModal && (
+              <button
+                onClick={onOpenSleepAlarmModal}
+                className="px-4 py-2.5 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-amber-600/20 flex items-center space-x-2 transition-all cursor-pointer"
+              >
+                <Clock className="w-4 h-4 text-white animate-pulse" />
+                <span>⏰ Sync Mobile Sleep Alarms (.ics)</span>
+              </button>
+            )}
+
             <button
               onClick={() => setIsModalOpen(true)}
-              className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 flex items-center space-x-2 transition-all"
+              className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 flex items-center space-x-2 transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Add to Google Calendar</span>

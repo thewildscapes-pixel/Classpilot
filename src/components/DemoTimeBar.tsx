@@ -12,6 +12,7 @@ interface DemoTimeBarProps {
   onSetCustomTime: (timeStr: string) => void;
   onResetToRealTime: (day?: DayOfWeek) => void;
   onJumpToNextClass10Mins: () => void;
+  onOpenSleepAlarmModal?: () => void;
 }
 
 export const DemoTimeBar: React.FC<DemoTimeBarProps> = ({
@@ -23,6 +24,7 @@ export const DemoTimeBar: React.FC<DemoTimeBarProps> = ({
   onSetCustomTime,
   onResetToRealTime,
   onJumpToNextClass10Mins,
+  onOpenSleepAlarmModal,
 }) => {
   const timeFormatted = currentDate.toLocaleTimeString([], {
     hour: '2-digit',
@@ -93,12 +95,24 @@ export const DemoTimeBar: React.FC<DemoTimeBarProps> = ({
           {/* Fast jump to 10 min trigger */}
           <button
             onClick={onJumpToNextClass10Mins}
-            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all"
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
             title="Fast forward directly to 10 minutes before next scheduled class to see the alert fire!"
           >
             <Zap className="w-3.5 h-3.5 fill-slate-950" />
             <span>Test 10-Min Alert</span>
           </button>
+
+          {/* Sleep Mode Alarm Configuration Modal Launcher */}
+          {onOpenSleepAlarmModal && (
+            <button
+              onClick={onOpenSleepAlarmModal}
+              className="px-3 py-1.5 rounded-xl bg-indigo-900/90 hover:bg-indigo-800 text-indigo-200 border border-indigo-500/40 font-bold text-xs flex items-center space-x-1.5 shadow-md transition-all cursor-pointer"
+              title="Configure phone alarms that ring even when mobile is in sleep mode"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>⏰ Mobile Sleep Alarms</span>
+            </button>
+          )}
 
           {/* Fast forward step buttons */}
           <div className="flex items-center space-x-1 bg-slate-800/90 p-1 rounded-xl border border-slate-700/80">

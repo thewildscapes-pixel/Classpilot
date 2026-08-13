@@ -77,6 +77,8 @@ import { GoogleCalendarView } from './components/GoogleCalendarView';
 import { ComplianceResearchView } from './components/ComplianceResearchView';
 import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { AlarmModal } from './components/AlarmModal';
+import { SleepModeAlarmModal } from './components/SleepModeAlarmModal';
+import { sendLocalClassNotification } from './utils/calendarSyncUtils';
 import { FooterSyncStatus } from './components/FooterSyncStatus';
 import { ActiveAlarm } from './types';
 
@@ -247,6 +249,7 @@ export default function App() {
 
   // School Bell Active Alarm modal state
   const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm>({ isRinging: false });
+  const [isSleepAlarmModalOpen, setIsSleepAlarmModalOpen] = useState<boolean>(false);
 
   const triggerSchoolBellAlarm = (title: string, room: string, startTime: string) => {
     playSchoolBellSound();
@@ -837,8 +840,10 @@ export default function App() {
     triggerSchoolBellAlarm(entry.subjectName, entry.room, entry.startTime);
 
     const title = minsRemaining === 0 ? `⏰ Class Starting Now!` : `🔔 Class Alert: ${minsRemaining}m Remaining!`;
-
     const message = `"${entry.subjectName}" (${entry.subjectCode}) in ${entry.room} for ${entry.batch}`;
+
+    // Send local OS screen notification if permission granted
+    sendLocalClassNotification(title, message);
 
     const newNotif: AlertNotification = {
       id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -1486,6 +1491,7 @@ export default function App() {
         lastSyncTime={lastSyncTime}
         timetableCount={timetable.length}
         onManualSync={syncCentralDatabase}
+        onOpenSleepAlarmModal={() => setIsSleepAlarmModalOpen(true)}
       />
 
       {/* Demo Time Control Bar ("Time Traveler") */}
@@ -1498,6 +1504,7 @@ export default function App() {
         onSetCustomTime={handleSetCustomTime}
         onResetToRealTime={handleResetToRealTime}
         onJumpToNextClass10Mins={handleJumpToNextClass10Mins}
+        onOpenSleepAlarmModal={() => setIsSleepAlarmModalOpen(true)}
       />
 
       {/* Main Content Viewport */}
@@ -1567,6 +1574,7 @@ export default function App() {
             currentUser={currentUser}
             timetable={timetable}
             onTriggerAlarm={(title, room, startTime) => triggerSchoolBellAlarm(title, room, startTime)}
+            onOpenSleepAlarmModal={() => setIsSleepAlarmModalOpen(true)}
           />
         )}
 
@@ -1727,6 +1735,15 @@ export default function App() {
         activeAlarm={activeAlarm}
         onStop={handleStopAlarm}
         onSnooze={handleSnoozeAlarm}
+      />
+
+      {/* Sleep Mode Mobile Phone Alarm Sync Modal */}
+      <SleepModeAlarmModal
+        isOpen={isSleepAlarmModalOpen}
+        onClose={() => setIsSleepAlarmModalOpen(false)}
+        currentUser={currentUser}
+        timetable={timetable}
+        facultyList={facultyList}
       />
 
       {/* Subtle Sync Status Footer */}
