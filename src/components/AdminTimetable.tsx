@@ -345,8 +345,26 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [studentSearchTerm, setStudentSearchTerm] = useState<string>('');
   const [studentClassFilter, setStudentClassFilter] = useState<string>('All');
   const [newStudentRoll, setNewStudentRoll] = useState<string>('');
+  const [newStudentEnrollmentNo, setNewStudentEnrollmentNo] = useState<string>('');
   const [newStudentName, setNewStudentName] = useState<string>('');
   const [newStudentClass, setNewStudentClass] = useState<string>('FYUGP 1st Sem Commerce');
+  const [newStudentSubject, setNewStudentSubject] = useState<string>('');
+
+  // Dynamically extract available subjects for selection dropdown
+  const availableSubjectsList = useMemo(() => {
+    const set = new Set<string>();
+    (timetable || []).forEach((t) => {
+      if (t.subjectCode && t.subjectName) {
+        set.add(`${t.subjectCode} - ${t.subjectName}`);
+      } else if (t.subjectName) {
+        set.add(t.subjectName);
+      } else if (t.subjectCode) {
+        set.add(t.subjectCode);
+      }
+    });
+    COMMERCE_HS_SUBJECTS.forEach((sub) => set.add(sub));
+    return Array.from(set).sort();
+  }, [timetable]);
 
   // JSON / Custom Routine Direct Sync Modal State
   const [isJsonSyncModalOpen, setIsJsonSyncModalOpen] = useState<boolean>(false);
@@ -522,14 +540,18 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     const templateData = [
       {
         'Roll No.': 'COM-2025-01',
-        'Student Name': 'Student Name 1',
+        'Enrolment No.': 'EN202500123',
+        'Student Name': 'Ananya Gogoi',
         'Class': 'FYUGP 1st Sem Commerce',
+        'Subject Selection': 'COM101 - Financial Accounting',
         'Academic Year': sessionAcademicYear,
       },
       {
         'Roll No.': 'COM-2025-02',
-        'Student Name': 'Student Name 2',
+        'Enrolment No.': 'EN202500124',
+        'Student Name': 'Bishal Sonowal',
         'Class': 'FYUGP 1st Sem Commerce',
+        'Subject Selection': 'COM102 - Business Law',
         'Academic Year': sessionAcademicYear,
       },
     ];
@@ -566,8 +588,22 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
         data.forEach((row, idx) => {
           const roll = String(row['Roll No.'] || row['Roll No'] || row['RollNo'] || row['Roll'] || '').trim();
+          const enrollmentNo = String(
+            row['Enrolment No.'] ||
+            row['Enrolment No'] ||
+            row['Enrollment No.'] ||
+            row['Enrollment No'] ||
+            row['EnrollmentNo'] ||
+            row['EnrolmentNo'] ||
+            row['Enrolment'] ||
+            row['Enrollment'] ||
+            ''
+          ).trim();
           const name = String(row['Student Name'] || row['Name'] || row['StudentName'] || '').trim();
           const classBatch = String(row['Class'] || row['Class/Section'] || row['Batch'] || 'FYUGP 1st Sem Commerce').trim();
+          const subject = String(
+            row['Subject Selection'] || row['Subject'] || row['Subject Name'] || row['Subjects'] || ''
+          ).trim();
           const acadYear = String(row['Academic Year'] || row['Year'] || sessionAcademicYear).trim();
 
           if (!roll || !name) {
@@ -585,8 +621,10 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
           newStudents.push({
             id: `st_${Date.now()}_${idx}`,
             rollNo: roll,
+            enrollmentNo: enrollmentNo || undefined,
             name: name,
             classBatch: classBatch,
+            subjectName: subject || undefined,
             academicYear: acadYear,
             sessionId: activeSessionId,
           });
@@ -623,15 +661,108 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     const newSt: Student = {
       id: `st_${Date.now()}`,
       rollNo: newStudentRoll.trim(),
+      enrollmentNo: newStudentEnrollmentNo.trim() || undefined,
       name: newStudentName.trim(),
       classBatch: newStudentClass.trim(),
+      subjectName: newStudentSubject.trim() || undefined,
       academicYear: sessionAcademicYear,
       sessionId: activeSessionId,
     };
 
     onUpdateStudents?.([...students, newSt]);
+
+    fetch('/api/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSt),
+    }).catch((err) => console.warn('Error syncing student to SQLite:', err));
+
     setNewStudentRoll('');
+    setNewStudentEnrollmentNo('');
     setNewStudentName('');
+    setNewStudentSubject('');
+  };
+
+  const handleExportStudentRosterExcel = () => {
+    const filtered = students.filter((s) => {
+      const term = studentSearchTerm.toLowerCase();
+      const matchSearch =
+        s.name.toLowerCase().includes(term) ||
+        s.rollNo.toLowerCase().includes(term) ||
+        (s.enrollmentNo && s.enrollmentNo.toLowerCase().includes(term)) ||
+        (s.subjectName && s.subjectName.toLowerCase().includes(term));
+      const matchClass = studentClassFilter === 'All' || s.classBatch === studentClassFilter;
+      return matchSearch && matchClass;
+    });
+
+    if (filtered.length === 0) {
+      alert('No student records found matching the current search/filter criteria.');
+      return;
+    }
+
+    const exportData = filtered.map((s, idx) => ({
+      'Sl. No.': idx + 1,
+      'Roll No.': s.rollNo,
+      'Enrolment No.': s.enrollmentNo || 'N/A',
+      'Student Full Name': s.name,
+      'Class / Section': s.classBatch,
+      'Subject Selection': s.subjectName || 'N/A',
+      'Department': s.department || 'Commerce',
+      'Mobile Number': s.mobile || 'N/A',
+      'Email Address': s.email || 'N/A',
+      'Academic Session': s.sessionId || `${activeSemesterCycle}-${sessionAcademicYear}`,
+      'Enrollment Source': s.enrollmentSource === 'qr_self_enrollment' ? 'QR Self-Enrolled' : 'Manual Admin',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Student Roster');
+    const fileName = `Student_Roster_${studentClassFilter.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
+
+  const handleExportStudentRosterCsv = () => {
+    const filtered = students.filter((s) => {
+      const term = studentSearchTerm.toLowerCase();
+      const matchSearch =
+        s.name.toLowerCase().includes(term) ||
+        s.rollNo.toLowerCase().includes(term) ||
+        (s.enrollmentNo && s.enrollmentNo.toLowerCase().includes(term)) ||
+        (s.subjectName && s.subjectName.toLowerCase().includes(term));
+      const matchClass = studentClassFilter === 'All' || s.classBatch === studentClassFilter;
+      return matchSearch && matchClass;
+    });
+
+    if (filtered.length === 0) {
+      alert('No student records found matching the current search/filter criteria.');
+      return;
+    }
+
+    const exportData = filtered.map((s, idx) => ({
+      'Sl. No.': idx + 1,
+      'Roll No.': s.rollNo,
+      'Enrolment No.': s.enrollmentNo || 'N/A',
+      'Student Full Name': s.name,
+      'Class / Section': s.classBatch,
+      'Subject Selection': s.subjectName || 'N/A',
+      'Department': s.department || 'Commerce',
+      'Mobile Number': s.mobile || 'N/A',
+      'Email Address': s.email || 'N/A',
+      'Academic Session': s.sessionId || `${activeSemesterCycle}-${sessionAcademicYear}`,
+      'Enrollment Source': s.enrollmentSource === 'qr_self_enrollment' ? 'QR Self-Enrolled' : 'Manual Admin',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const csvOutput = XLSX.utils.sheet_to_csv(worksheet);
+    const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const fileName = `Student_Roster_${studentClassFilter.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.setAttribute('download', fileName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleDeleteStudent = (stId: string) => {
@@ -3882,7 +4013,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 <span>Faculty Pre-Registration & Mobile Database</span>
               </h3>
               <p className="text-xs text-slate-400">
-                Pre-register faculty mobile numbers & employee IDs before routine deployment to enable Mobile OTP Login.
+                Pre-register faculty mobile numbers & employee IDs before routine deployment to enable Mobile / Email Login.
               </p>
             </div>
 
@@ -3954,7 +4085,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 </div>
                 <ul className="space-y-1 text-slate-400 text-[11px]">
                   <li>• <strong className="text-slate-200">Faculty Name</strong> (e.g. Dr. Deborshee Gogoi)</li>
-                  <li>• <strong className="text-slate-200">Mobile Number</strong> (10-digit, used for OTP)</li>
+                  <li>• <strong className="text-slate-200">Mobile Number</strong> (10-digit, used for Login)</li>
                   <li>• <strong className="text-slate-200">Employee ID</strong> (e.g. DC-EMP-001)</li>
                   <li>• <strong className="text-slate-200">Department</strong> (e.g. Commerce, Physics)</li>
                 </ul>
@@ -4209,7 +4340,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                         <td className="p-3">
                           {isMobilePresent ? (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                              ✓ Verified Ready for Mobile OTP
+                              ✓ Verified Ready for Direct Login
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
@@ -4302,50 +4433,85 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
             </div>
 
             {/* Quick Add Single Student Form */}
-            <form onSubmit={handleAddSingleStudent} className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/80 grid grid-cols-1 md:grid-cols-4 gap-3">
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Roll Number</label>
-                <input
-                  type="text"
-                  placeholder="e.g. COM-2025-09"
-                  value={newStudentRoll}
-                  onChange={(e) => setNewStudentRoll(e.target.value)}
-                  className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none"
-                  required
-                />
+            <form onSubmit={handleAddSingleStudent} className="bg-slate-900/90 p-4 rounded-xl border border-slate-700/80 space-y-3">
+              <div className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                <UserPlus className="w-4 h-4 text-emerald-400" />
+                <span>Quick Add Single Student</span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Roll Number *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. COM-2025-09"
+                    value={newStudentRoll}
+                    onChange={(e) => setNewStudentRoll(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Enrolment No.</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. EN202500123"
+                    value={newStudentEnrollmentNo}
+                    onChange={(e) => setNewStudentEnrollmentNo(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Student Full Name *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Priya Chetri"
+                    value={newStudentName}
+                    onChange={(e) => setNewStudentName(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Class / Section *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. FYUGP 1st Sem Commerce"
+                    value={newStudentClass}
+                    onChange={(e) => setNewStudentClass(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-emerald-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Subject Selection</label>
+                  <input
+                    type="text"
+                    list="student-subjects-list"
+                    placeholder="Select or type subject"
+                    value={newStudentSubject}
+                    onChange={(e) => setNewStudentSubject(e.target.value)}
+                    className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none focus:border-emerald-500"
+                  />
+                  <datalist id="student-subjects-list">
+                    {availableSubjectsList.map((sub) => (
+                      <option key={sub} value={sub} />
+                    ))}
+                  </datalist>
+                </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Student Full Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Priya Chetri"
-                  value={newStudentName}
-                  onChange={(e) => setNewStudentName(e.target.value)}
-                  className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Class / Section</label>
-                <input
-                  type="text"
-                  placeholder="e.g. FYUGP 1st Sem Commerce"
-                  value={newStudentClass}
-                  onChange={(e) => setNewStudentClass(e.target.value)}
-                  className="w-full bg-slate-800 text-white text-xs rounded-lg px-3 py-2 border border-slate-700 focus:outline-none"
-                  required
-                />
-              </div>
-
-              <div className="flex items-end">
+              <div className="flex justify-end pt-1">
                 <button
                   type="submit"
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow-md transition-all flex items-center justify-center space-x-1 cursor-pointer"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Add Student</span>
+                  <span>Add Student to Roster</span>
                 </button>
               </div>
             </form>
@@ -4353,32 +4519,53 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
 
           {/* Student Roster List Table */}
           <div className="bg-slate-800/90 rounded-2xl border border-slate-700 overflow-hidden shadow-xl space-y-3 p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div className="relative flex-1">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  placeholder="Search student roll number, name..."
+                  placeholder="Search student roll no., enrolment no., name, subject..."
                   value={studentSearchTerm}
                   onChange={(e) => setStudentSearchTerm(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2 focus:outline-none"
+                  className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-emerald-500"
                 />
               </div>
 
-              <div className="flex items-center space-x-2">
-                <span className="text-xs text-slate-400">Class Filter:</span>
-                <select
-                  value={studentClassFilter}
-                  onChange={(e) => setStudentClassFilter(e.target.value)}
-                  className="bg-slate-900 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none"
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs text-slate-400">Class Filter:</span>
+                  <select
+                    value={studentClassFilter}
+                    onChange={(e) => setStudentClassFilter(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-white text-xs rounded-xl px-3 py-2 focus:outline-none"
+                  >
+                    <option value="All">All Classes ({students.length})</option>
+                    {Array.from(new Set(students.map((s) => s.classBatch))).map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Export Buttons */}
+                <button
+                  onClick={handleExportStudentRosterExcel}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md transition-all cursor-pointer"
+                  title="Export current roster view to Excel (.xlsx)"
                 >
-                  <option value="All">All Classes ({students.length})</option>
-                  {Array.from(new Set(students.map((s) => s.classBatch))).map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Excel (.xlsx)</span>
+                </button>
+
+                <button
+                  onClick={handleExportStudentRosterCsv}
+                  className="px-3.5 py-2 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md transition-all cursor-pointer"
+                  title="Export current roster view to CSV (.csv)"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export CSV (.csv)</span>
+                </button>
               </div>
             </div>
 
@@ -4387,8 +4574,10 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
                   <tr>
                     <th className="p-3">Roll No.</th>
+                    <th className="p-3">Enrolment No.</th>
                     <th className="p-3">Student Name</th>
                     <th className="p-3">Class / Section</th>
+                    <th className="p-3">Subject Selection</th>
                     <th className="p-3">Session Tag</th>
                     <th className="p-3 text-right">Actions</th>
                   </tr>
@@ -4396,24 +4585,29 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 <tbody className="divide-y divide-slate-700/50">
                   {students.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center text-slate-400">
-                        No student rosters loaded yet. Download the template above or add a student manually.
+                      <td colSpan={7} className="p-8 text-center text-slate-400">
+                        No student rosters loaded yet. Download the template above, upload an Excel file, or add a student manually.
                       </td>
                     </tr>
                   ) : (
                     students
                       .filter((s) => {
+                        const term = studentSearchTerm.toLowerCase();
                         const matchSearch =
-                          s.name.toLowerCase().includes(studentSearchTerm.toLowerCase()) ||
-                          s.rollNo.toLowerCase().includes(studentSearchTerm.toLowerCase());
+                          s.name.toLowerCase().includes(term) ||
+                          s.rollNo.toLowerCase().includes(term) ||
+                          (s.enrollmentNo && s.enrollmentNo.toLowerCase().includes(term)) ||
+                          (s.subjectName && s.subjectName.toLowerCase().includes(term));
                         const matchClass = studentClassFilter === 'All' || s.classBatch === studentClassFilter;
                         return matchSearch && matchClass;
                       })
                       .map((s) => (
                         <tr key={s.id} className="hover:bg-slate-700/30 transition-colors">
                           <td className="p-3 font-mono font-bold text-emerald-400">{s.rollNo}</td>
+                          <td className="p-3 font-mono text-slate-300">{s.enrollmentNo || '—'}</td>
                           <td className="p-3 font-bold text-white">{s.name}</td>
                           <td className="p-3 text-slate-300">{s.classBatch}</td>
+                          <td className="p-3 font-medium text-indigo-300">{s.subjectName || '—'}</td>
                           <td className="p-3">
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                               {s.sessionId || `${activeSemesterCycle}-${sessionAcademicYear}`}
@@ -5492,7 +5686,7 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-emerald-300 block mb-1">
-                    Pre-Reg Mobile (OTP Login)
+                    Pre-Reg Mobile (Direct Login)
                   </label>
                   <input
                     type="text"

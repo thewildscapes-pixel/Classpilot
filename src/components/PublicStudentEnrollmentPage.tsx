@@ -102,6 +102,11 @@ export const PublicStudentEnrollmentPage: React.FC<PublicStudentEnrollmentPagePr
       return;
     }
 
+    if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setErrorMsg('Please enter a valid Email Address format.');
+      return;
+    }
+
     if (isDeactivated) {
       setErrorMsg('This QR enrollment link has been deactivated by the institution.');
       return;

@@ -41,8 +41,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [email, setEmail] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [selectedFacultyIdForLogin, setSelectedFacultyIdForLogin] = useState<string>('');
-  const [otpStep, setOtpStep] = useState<boolean>(false);
-  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
 
   // Logged-in Faculty Role & Profile Settings
   const [activeRole, setActiveRole] = useState<'educator' | 'mentor'>('educator');
@@ -54,81 +52,54 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isAuthMode, setIsAuthMode] = useState<boolean>(!currentUser);
 
-  // Send OTP handler
-  const handleSendOtp = (e: React.FormEvent) => {
+  // Direct login handler (verifies email & mobile format)
+  const handleDirectSignIn = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage('');
 
+    const cleanEmail = email.trim().toLowerCase();
     const cleanPhone = phone.trim().replace(/\D/g, '');
-    if (!cleanPhone || cleanPhone.length < 8) {
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      setErrorMessage('Please enter a valid email address (e.g. faculty@digboicollege.edu.in).');
+      return;
+    }
+
+    // Validate mobile number format (must be 10 digits)
+    if (!cleanPhone || cleanPhone.length < 10) {
       setErrorMessage('Please enter a valid 10-digit mobile number.');
       return;
     }
 
-    // Check pre-registered faculty records or superadmin
-    const matchedFac = facultyList.find(
-      (f) =>
-        (selectedFacultyIdForLogin && f.id === selectedFacultyIdForLogin) ||
-        isPhoneMatch(f.phone, cleanPhone) ||
-        isPhoneMatch(f.whatsappPhone, cleanPhone) ||
-        (f.email && email && f.email.toLowerCase().trim() === email.toLowerCase().trim()) ||
-        (facultyName && isFacultyNameMatch(f.name, facultyName))
-    );
-
-    const matchedAdmin = cleanPhone === '9706375001' || email.toLowerCase().includes('thewildscapes');
-
-    if (!matchedFac && !matchedAdmin && facultyList.length > 0 && !selectedFacultyIdForLogin) {
-      // Auto-select token match if available
-      const tokenMatch = facultyList.find((f) => isFacultyNameMatch(f.name, facultyName));
-      if (tokenMatch) {
-        setSelectedFacultyIdForLogin(tokenMatch.id);
-      }
-    }
-
     setIsLoading(true);
+
     setTimeout(() => {
       setIsLoading(false);
-      setOtpStep(true);
-    }, 400);
-  };
 
-  // Verify OTP handler
-  const handleVerifyOtp = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage('');
-    const code = otpDigits.join('');
-
-    if (code.length < 6) {
-      setErrorMessage('Please enter the complete 6-digit OTP.');
-      return;
-    }
-
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      const cleanPhone = phone.trim().replace(/\D/g, '');
       const matchedFac = facultyList.find(
         (f) =>
           (selectedFacultyIdForLogin && f.id === selectedFacultyIdForLogin) ||
           isPhoneMatch(f.phone, cleanPhone) ||
           isPhoneMatch(f.whatsappPhone, cleanPhone) ||
-          (f.email && email && f.email.toLowerCase().trim() === email.toLowerCase().trim()) ||
+          (f.email && f.email.toLowerCase().trim() === cleanEmail) ||
           (facultyName && isFacultyNameMatch(f.name, facultyName))
       );
 
       if (matchedFac && onUpdateFaculty) {
-        if (!matchedFac.phone || matchedFac.phone !== cleanPhone) {
-          onUpdateFaculty(matchedFac.id, { phone: cleanPhone, whatsappPhone: cleanPhone });
+        if (!matchedFac.phone || matchedFac.phone !== cleanPhone || !matchedFac.email) {
+          onUpdateFaculty(matchedFac.id, { phone: cleanPhone, whatsappPhone: cleanPhone, email: cleanEmail });
         }
       }
 
       const newUser: User = {
         id: matchedFac ? matchedFac.id : `user_${Date.now()}`,
         name: matchedFac ? matchedFac.name : facultyName.trim() || 'Faculty Member',
-        email: matchedFac ? matchedFac.email : email.trim() || 'faculty@digboicollege.edu.in',
+        email: matchedFac?.email || cleanEmail,
         phone: cleanPhone,
         whatsappPhone: cleanPhone,
-        role: matchedAdminOrFacRole(cleanPhone, email, matchedFac),
+        role: matchedAdminOrFacRole(cleanPhone, cleanEmail, matchedFac),
         facultyId: matchedFac ? matchedFac.id : `fac_${cleanPhone}`,
         department: matchedFac ? matchedFac.department : department,
         employeeId: matchedFac?.employeeId || 'DC-EMP-001',
@@ -138,7 +109,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       setFacultyName(newUser.name);
       onLoginSuccess(newUser, `token_${Date.now()}`);
       setIsAuthMode(false);
-    }, 400);
+    }, 300);
   };
 
   const matchedAdminOrFacRole = (p: string, e: string, matchedFac?: Faculty) => {
@@ -305,151 +276,100 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
             </div>
 
-            {/* "Or sign in with Email & WhatsApp OTP" Divider */}
+            {/* "Or sign in with Email & Mobile Number" Divider */}
             <div className="relative flex items-center justify-center my-4">
               <div className="border-t border-slate-200 w-full" />
               <span className="bg-white px-3 text-xs font-semibold text-slate-400 shrink-0 uppercase tracking-wider">
-                Or sign in with OTP
+                Or sign in with Email & Mobile
               </span>
               <div className="border-t border-slate-200 w-full" />
             </div>
 
-            {/* Combined Email + WhatsApp OTP Section */}
-            {!otpStep ? (
-              <form onSubmit={handleSendOtp} className="space-y-3.5 bg-slate-50/80 p-4 rounded-2xl border border-slate-200">
-                <div className="text-left space-y-0.5">
-                  <div className="text-xs font-extrabold text-slate-800">Email & WhatsApp Authentication</div>
-                  <div className="text-[11px] text-slate-500">We will send a 6-digit verification OTP to both your email and WhatsApp number.</div>
-                </div>
+            {/* Direct Email + Mobile Authentication Section */}
+            <form onSubmit={handleDirectSignIn} className="space-y-3.5 bg-slate-50/80 p-4 rounded-2xl border border-slate-200">
+              <div className="text-left space-y-0.5">
+                <div className="text-xs font-extrabold text-slate-800">Email & Mobile Authentication</div>
+                <div className="text-[11px] text-slate-500">Enter your official email address and 10-digit WhatsApp mobile number to enter.</div>
+              </div>
 
-                {/* Faculty Profile Selection Dropdown (Optional for pre-loaded routines) */}
-                {facultyList && facultyList.length > 0 && (
-                  <div className="space-y-1 text-left">
-                    <label className="text-[11px] font-bold text-slate-700 block flex items-center justify-between">
-                      <span>Faculty Member Name</span>
-                      <span className="text-[10px] text-blue-600 font-semibold">Links to assigned routine</span>
-                    </label>
-                    <div className="relative">
-                      <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <select
-                        value={selectedFacultyIdForLogin}
-                        onChange={(e) => {
-                          const facId = e.target.value;
-                          setSelectedFacultyIdForLogin(facId);
-                          const fac = facultyList.find((f) => f.id === facId);
-                          if (fac) {
-                            if (fac.email) setEmail(fac.email);
-                            if (fac.phone) setPhone(fac.phone);
-                            setFacultyName(fac.name);
-                            if (fac.department) setDepartment(fac.department);
-                          }
-                        }}
-                        className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs cursor-pointer"
-                      >
-                        <option value="">-- Select Your Name (Auto-linked) --</option>
-                        {facultyList.map((fac) => (
-                          <option key={fac.id} value={fac.id}>
-                            {fac.name} ({fac.department})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {/* Email Address Input */}
+              {/* Faculty Profile Selection Dropdown (Optional for pre-loaded routines) */}
+              {facultyList && facultyList.length > 0 && (
                 <div className="space-y-1 text-left">
-                  <label className="text-[11px] font-bold text-slate-700 block">Email Address</label>
+                  <label className="text-[11px] font-bold text-slate-700 block flex items-center justify-between">
+                    <span>Faculty Member Name</span>
+                    <span className="text-[10px] text-blue-600 font-semibold">Links to assigned routine</span>
+                  </label>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="email"
-                      required
-                      placeholder="e.g. abcd@gmail.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* WhatsApp Phone Input */}
-                <div className="space-y-1 text-left">
-                  <label className="text-[11px] font-bold text-slate-700 block">WhatsApp Phone Number</label>
-                  <div className="relative">
-                    <Phone className="w-4 h-4 text-emerald-600 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="tel"
-                      required
-                      placeholder="e.g. 9912345678"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* Get OTP Button */}
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all cursor-pointer flex items-center justify-center space-x-2"
-                >
-                  <Phone className="w-4 h-4" />
-                  <span>{isLoading ? 'Sending OTP...' : 'Send OTP via Email & WhatsApp'}</span>
-                </button>
-              </form>
-            ) : (
-              /* OTP Verification Step */
-              <form onSubmit={handleVerifyOtp} className="space-y-4 bg-emerald-50/60 p-4 rounded-2xl border border-emerald-200/80 text-left">
-                <div className="p-2.5 bg-amber-100/80 border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold flex items-center justify-between">
-                  <span>📲 Simulated SMS OTP Sent: <strong className="text-amber-950 font-mono text-sm">849201</strong></span>
-                  <span className="text-[10px] text-amber-700 font-normal">Auto-filled</span>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-xs font-extrabold text-emerald-900 flex items-center justify-between">
-                    <span>Enter 6-Digit Mobile OTP</span>
-                    <button
-                      type="button"
-                      onClick={() => setOtpStep(false)}
-                      className="text-[10px] text-blue-600 font-bold hover:underline"
-                    >
-                      Change Email/Phone
-                    </button>
-                  </div>
-                  <div className="text-[11px] text-emerald-800">
-                    Sent to <b>{email}</b> & <b>{phone}</b>
-                  </div>
-                </div>
-
-                {/* OTP Digits Input */}
-                <div className="flex items-center justify-between gap-1.5">
-                  {otpDigits.map((digit, idx) => (
-                    <input
-                      key={idx}
-                      type="text"
-                      maxLength={1}
-                      value={digit}
+                    <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <select
+                      value={selectedFacultyIdForLogin}
                       onChange={(e) => {
-                        const newDigits = [...otpDigits];
-                        newDigits[idx] = e.target.value.slice(-1);
-                        setOtpDigits(newDigits);
+                        const facId = e.target.value;
+                        setSelectedFacultyIdForLogin(facId);
+                        const fac = facultyList.find((f) => f.id === facId);
+                        if (fac) {
+                          if (fac.email) setEmail(fac.email);
+                          if (fac.phone) setPhone(fac.phone);
+                          setFacultyName(fac.name);
+                          if (fac.department) setDepartment(fac.department);
+                        }
                       }}
-                      className="w-10 h-11 bg-white border border-emerald-300 text-center font-bold text-lg text-emerald-950 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-600 shadow-xs"
-                    />
-                  ))}
+                      className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs cursor-pointer"
+                    >
+                      <option value="">-- Select Your Name (Auto-linked) --</option>
+                      {facultyList.map((fac) => (
+                        <option key={fac.id} value={fac.id}>
+                          {fac.name} ({fac.department})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
+              )}
 
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md shadow-blue-600/20 transition-all cursor-pointer flex items-center justify-center space-x-2"
-                >
-                  <span>{isLoading ? 'Verifying...' : 'Verify OTP & Enter ClassPilot'}</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </form>
-            )}
+              {/* Email Address Input */}
+              <div className="space-y-1 text-left">
+                <label className="text-[11px] font-bold text-slate-700 block">Email Address *</label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. faculty@digboicollege.edu.in"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs"
+                  />
+                </div>
+              </div>
+
+              {/* WhatsApp Phone Input */}
+              <div className="space-y-1 text-left">
+                <label className="text-[11px] font-bold text-slate-700 block">10-Digit Mobile Number *</label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 text-emerald-600 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    placeholder="e.g. 9876543210"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    className="w-full bg-white border border-slate-300 text-slate-900 text-xs rounded-xl pl-10 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent font-medium shadow-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Direct Sign-In Button */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md shadow-blue-600/20 transition-all cursor-pointer flex items-center justify-center space-x-2"
+              >
+                <span>{isLoading ? 'Signing In...' : 'Sign In to ClassPilot'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
 
             {/* Support Link */}
             <div className="pt-4 text-center text-xs text-slate-500">

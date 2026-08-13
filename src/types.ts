@@ -126,10 +126,13 @@ export interface SavedFacultyProfile {
 export interface Student {
   id: string;
   rollNo: string;
+  enrollmentNo?: string;
   name: string;
   classBatch: string;
   section?: string;
   department?: string;
+  subjectCode?: string;
+  subjectName?: string;
   mobile?: string;
   email?: string;
   academicYear: string;
@@ -163,12 +166,15 @@ export interface StudentEnrollment {
   sessionToken?: string;
   name: string;
   rollNo: string;
+  enrollmentNo?: string;
   mobile: string;
   email?: string;
   classBatch: string;
   section: string;
   department: string;
   semester: string;
+  subjectCode?: string;
+  subjectName?: string;
   status: 'pending' | 'approved' | 'rejected';
   enrollmentSource: 'qr_self_enrollment' | 'manual_admin';
   submittedAt: string; // ISO string

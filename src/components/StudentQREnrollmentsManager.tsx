@@ -231,12 +231,14 @@ export const StudentQREnrollmentsManager: React.FC<StudentQREnrollmentsManagerPr
     }
   };
 
-  // Excel Roster Export
+  // Excel & CSV Roster Export
   const handleExportRosterToExcel = () => {
     const formatted = students.map((s) => ({
       'Roll Number': s.rollNo,
+      'Enrolment No.': s.enrollmentNo || 'N/A',
       'Student Full Name': s.name,
       'Class / Batch': s.classBatch,
+      'Subject Selection': s.subjectName || 'N/A',
       Section: s.section || 'Section A',
       Department: s.department || 'N/A',
       'Mobile Number': s.mobile || 'N/A',
@@ -249,6 +251,33 @@ export const StudentQREnrollmentsManager: React.FC<StudentQREnrollmentsManagerPr
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Student Roster');
     XLSX.writeFile(wb, `ClassPilot_Student_Roster_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const handleExportRosterToCsv = () => {
+    const formatted = students.map((s) => ({
+      'Roll Number': s.rollNo,
+      'Enrolment No.': s.enrollmentNo || 'N/A',
+      'Student Full Name': s.name,
+      'Class / Batch': s.classBatch,
+      'Subject Selection': s.subjectName || 'N/A',
+      Section: s.section || 'Section A',
+      Department: s.department || 'N/A',
+      'Mobile Number': s.mobile || 'N/A',
+      'Email Address': s.email || 'N/A',
+      Source: s.enrollmentSource === 'qr_self_enrollment' ? 'QR Self-Enrolled' : 'Manual Admin',
+      'Session Tag': s.sessionId || '2025-26',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(formatted);
+    const csvOutput = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csvOutput], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `ClassPilot_Student_Roster_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -590,23 +619,33 @@ export const StudentQREnrollmentsManager: React.FC<StudentQREnrollmentsManagerPr
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h3 className="font-bold text-sm text-white">Enrolled Students Roster ({students.length})</h3>
 
-            <button
-              onClick={handleExportRosterToExcel}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md transition-all cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Download Roster (.xlsx)</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleExportRosterToExcel}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md transition-all cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Excel (.xlsx)</span>
+              </button>
+              <button
+                onClick={handleExportRosterToCsv}
+                className="px-3.5 py-1.5 bg-teal-700 hover:bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-md transition-all cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export CSV (.csv)</span>
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-900 text-slate-400 font-semibold border-b border-slate-700">
                 <tr>
-                  <th className="p-3">Roll Number</th>
+                  <th className="p-3">Roll No.</th>
+                  <th className="p-3">Enrolment No.</th>
                   <th className="p-3">Student Name</th>
                   <th className="p-3">Class / Batch</th>
-                  <th className="p-3">Section</th>
+                  <th className="p-3">Subject Selection</th>
                   <th className="p-3">Enrollment Source</th>
                   <th className="p-3">Mobile Contact</th>
                 </tr>
@@ -614,7 +653,7 @@ export const StudentQREnrollmentsManager: React.FC<StudentQREnrollmentsManagerPr
               <tbody className="divide-y divide-slate-700/50">
                 {students.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                    <td colSpan={7} className="p-8 text-center text-slate-400">
                       No enrolled students in master list. Generate a QR code to begin student self-enrollments!
                     </td>
                   </tr>
@@ -622,9 +661,10 @@ export const StudentQREnrollmentsManager: React.FC<StudentQREnrollmentsManagerPr
                   students.map((st) => (
                     <tr key={st.id} className="hover:bg-slate-700/30 transition-colors">
                       <td className="p-3 font-mono font-bold text-emerald-400">{st.rollNo}</td>
+                      <td className="p-3 font-mono text-slate-300">{st.enrollmentNo || '—'}</td>
                       <td className="p-3 font-bold text-white">{st.name}</td>
                       <td className="p-3 text-slate-300">{st.classBatch}</td>
-                      <td className="p-3 text-slate-300">{st.section || 'Section A'}</td>
+                      <td className="p-3 text-indigo-300 font-medium">{st.subjectName || '—'}</td>
                       <td className="p-3">
                         {st.enrollmentSource === 'qr_self_enrollment' ? (
                           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center space-x-1 w-fit">

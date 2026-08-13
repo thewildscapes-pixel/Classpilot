@@ -171,9 +171,15 @@ async function initDatabase() {
     CREATE TABLE IF NOT EXISTS students (
       id TEXT PRIMARY KEY,
       rollNo TEXT NOT NULL,
+      enrollmentNo TEXT,
       name TEXT NOT NULL,
       classBatch TEXT,
       section TEXT,
+      department TEXT,
+      subjectCode TEXT,
+      subjectName TEXT,
+      mobile TEXT,
+      email TEXT,
       academicYear TEXT,
       sessionId TEXT
     );
@@ -304,6 +310,20 @@ async function initDatabase() {
   extraDiaryCols.forEach((colDef) => {
     try {
       runSql(`ALTER TABLE class_diary ADD COLUMN ${colDef}`);
+    } catch (e) {}
+  });
+
+  const extraStudentCols = [
+    'enrollmentNo TEXT',
+    'subjectCode TEXT',
+    'subjectName TEXT',
+    'department TEXT',
+    'mobile TEXT',
+    'email TEXT',
+  ];
+  extraStudentCols.forEach((colDef) => {
+    try {
+      runSql(`ALTER TABLE students ADD COLUMN ${colDef}`);
     } catch (e) {}
   });
 
@@ -1068,9 +1088,15 @@ async function startServer() {
     const studentsList: Student[] = rows.map((r: any) => ({
       id: r.id,
       rollNo: r.rollNo,
+      enrollmentNo: r.enrollmentNo || '',
       name: r.name,
       classBatch: r.classBatch || 'FYUGP 1st Sem Commerce',
       section: r.section || 'Sec A',
+      department: r.department || '',
+      subjectCode: r.subjectCode || '',
+      subjectName: r.subjectName || '',
+      mobile: r.mobile || '',
+      email: r.email || '',
       academicYear: r.academicYear || '2025–26',
       sessionId: r.sessionId || 'Odd-2025-26',
     }));
@@ -1081,16 +1107,22 @@ async function startServer() {
     const s: Student = {
       id: req.body.id || `st_${Date.now()}`,
       rollNo: req.body.rollNo,
+      enrollmentNo: req.body.enrollmentNo || '',
       name: req.body.name,
       classBatch: req.body.classBatch || 'FYUGP 1st Sem Commerce',
       section: req.body.section || 'Sec A',
+      department: req.body.department || '',
+      subjectCode: req.body.subjectCode || '',
+      subjectName: req.body.subjectName || '',
+      mobile: req.body.mobile || '',
+      email: req.body.email || '',
       academicYear: req.body.academicYear || '2025–26',
       sessionId: req.body.sessionId || 'Odd-2025-26',
     };
 
     runSql(
-      'INSERT OR REPLACE INTO students (id, rollNo, name, classBatch, section, academicYear, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [s.id, s.rollNo, s.name, s.classBatch, s.section, s.academicYear, s.sessionId]
+      'INSERT OR REPLACE INTO students (id, rollNo, enrollmentNo, name, classBatch, section, department, subjectCode, subjectName, mobile, email, academicYear, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [s.id, s.rollNo, s.enrollmentNo, s.name, s.classBatch, s.section, s.department, s.subjectCode, s.subjectName, s.mobile, s.email, s.academicYear, s.sessionId]
     );
 
     res.json(s);
@@ -1101,8 +1133,22 @@ async function startServer() {
     const body = req.body;
 
     runSql(
-      'UPDATE students SET rollNo = ?, name = ?, classBatch = ?, section = ?, academicYear = ?, sessionId = ? WHERE id = ?',
-      [body.rollNo, body.name, body.classBatch, body.section, body.academicYear, body.sessionId, id]
+      'UPDATE students SET rollNo = ?, enrollmentNo = ?, name = ?, classBatch = ?, section = ?, department = ?, subjectCode = ?, subjectName = ?, mobile = ?, email = ?, academicYear = ?, sessionId = ? WHERE id = ?',
+      [
+        body.rollNo,
+        body.enrollmentNo || '',
+        body.name,
+        body.classBatch,
+        body.section,
+        body.department || '',
+        body.subjectCode || '',
+        body.subjectName || '',
+        body.mobile || '',
+        body.email || '',
+        body.academicYear,
+        body.sessionId,
+        id,
+      ]
     );
 
     res.json({ id, ...body });
@@ -1321,13 +1367,19 @@ async function startServer() {
 
     students.forEach((s: Student) => {
       runSql(
-        'INSERT OR REPLACE INTO students (id, rollNo, name, classBatch, section, academicYear, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT OR REPLACE INTO students (id, rollNo, enrollmentNo, name, classBatch, section, department, subjectCode, subjectName, mobile, email, academicYear, sessionId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           s.id || `st_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
           s.rollNo,
+          s.enrollmentNo || '',
           s.name,
           s.classBatch || 'FYUGP 1st Sem Commerce',
           s.section || 'Sec A',
+          s.department || '',
+          s.subjectCode || '',
+          s.subjectName || '',
+          s.mobile || '',
+          s.email || '',
           s.academicYear || '2025–26',
           s.sessionId || 'Odd-2025-26',
         ]
