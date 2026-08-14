@@ -95,6 +95,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     setTimeout(() => {
       setIsLoading(false);
 
+      const isDeborshee =
+        boundDevice.boundEmail?.toLowerCase() === 'thewildscapes@gmail.com' ||
+        boundDevice.boundPhone === '9706375001' ||
+        boundDevice.boundFacultyId === 'fac_1';
+
       const matchedFac = facultyList.find(
         (f) =>
           (boundDevice.boundFacultyId && f.id === boundDevice.boundFacultyId) ||
@@ -103,18 +108,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           (boundDevice.boundFacultyName && isFacultyNameMatch(f.name, boundDevice.boundFacultyName))
       );
 
-      const user: User = {
-        id: matchedFac ? matchedFac.id : boundDevice.boundFacultyId || `user_${Date.now()}`,
-        name: matchedFac ? matchedFac.name : boundDevice.boundFacultyName || 'Faculty Member',
-        email: matchedFac?.email || boundDevice.boundEmail || '',
-        phone: matchedFac?.phone || boundDevice.boundPhone || '',
-        whatsappPhone: matchedFac?.whatsappPhone || boundDevice.boundPhone || '',
-        role: matchedAdminOrFacRole(boundDevice.boundPhone || '', boundDevice.boundEmail || '', matchedFac),
-        facultyId: matchedFac ? matchedFac.id : boundDevice.boundFacultyId,
-        department: matchedFac ? matchedFac.department : department,
-        employeeId: matchedFac?.employeeId || 'DC-EMP-001',
-        isVerified: true,
-      };
+      const user: User = isDeborshee
+        ? {
+            id: 'fac_1',
+            name: 'Dr. Deborshee Gogoi',
+            email: 'thewildscapes@gmail.com',
+            phone: '9706375001',
+            whatsappPhone: '9706375001',
+            role: 'admin',
+            facultyId: 'fac_1',
+            department: 'Commerce',
+            designation: 'Associate Professor & Academic Coordinator',
+            employeeId: 'DC-COM-001',
+            isVerified: true,
+            isAcademicCoordinator: true,
+          }
+        : {
+            id: matchedFac ? matchedFac.id : boundDevice.boundFacultyId || `user_${Date.now()}`,
+            name: matchedFac ? matchedFac.name : boundDevice.boundFacultyName || 'Faculty Member',
+            email: matchedFac?.email || boundDevice.boundEmail || '',
+            phone: matchedFac?.phone || boundDevice.boundPhone || '',
+            whatsappPhone: matchedFac?.whatsappPhone || boundDevice.boundPhone || '',
+            role: matchedAdminOrFacRole(boundDevice.boundPhone || '', boundDevice.boundEmail || '', matchedFac),
+            facultyId: matchedFac ? matchedFac.id : boundDevice.boundFacultyId,
+            department: matchedFac ? matchedFac.department : department,
+            employeeId: matchedFac?.employeeId || 'DC-EMP-001',
+            isVerified: true,
+          };
 
       setFacultyName(user.name);
       onLoginSuccess(user, `token_${Date.now()}`);
@@ -148,6 +168,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
     setTimeout(() => {
       setIsLoading(false);
 
+      const isDeborshee = cleanEmail === 'thewildscapes@gmail.com' || cleanPhone === '9706375001';
+
       // Secure faculty identity resolution (strictly by email or phone match)
       const matchedFac = facultyList.find(
         (f) =>
@@ -163,8 +185,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         }
       }
 
-      const assignedFacId = matchedFac ? matchedFac.id : `fac_${cleanPhone}`;
-      const resolvedName = matchedFac ? matchedFac.name : facultyName.trim() || 'Faculty Member';
+      const assignedFacId = isDeborshee ? 'fac_1' : matchedFac ? matchedFac.id : `fac_${cleanPhone}`;
+      const resolvedName = isDeborshee ? 'Dr. Deborshee Gogoi' : matchedFac ? matchedFac.name : facultyName.trim() || 'Faculty Member';
 
       // Bind this hardware device to the verified faculty member
       const newBinding = bindDeviceToFaculty({
@@ -176,18 +198,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       });
       setBoundDevice(newBinding);
 
-      const newUser: User = {
-        id: matchedFac ? matchedFac.id : `user_${Date.now()}`,
-        name: resolvedName,
-        email: matchedFac?.email || cleanEmail,
-        phone: cleanPhone,
-        whatsappPhone: cleanPhone,
-        role: matchedAdminOrFacRole(cleanPhone, cleanEmail, matchedFac),
-        facultyId: assignedFacId,
-        department: matchedFac ? matchedFac.department : department,
-        employeeId: matchedFac?.employeeId || 'DC-EMP-001',
-        isVerified: true,
-      };
+      const newUser: User = isDeborshee
+        ? {
+            id: 'fac_1',
+            name: 'Dr. Deborshee Gogoi',
+            email: 'thewildscapes@gmail.com',
+            phone: '9706375001',
+            whatsappPhone: '9706375001',
+            role: 'admin',
+            facultyId: 'fac_1',
+            department: 'Commerce',
+            designation: 'Associate Professor & Academic Coordinator',
+            employeeId: 'DC-COM-001',
+            isVerified: true,
+            isAcademicCoordinator: true,
+          }
+        : {
+            id: matchedFac ? matchedFac.id : `user_${Date.now()}`,
+            name: resolvedName,
+            email: matchedFac?.email || cleanEmail,
+            phone: cleanPhone,
+            whatsappPhone: cleanPhone,
+            role: matchedAdminOrFacRole(cleanPhone, cleanEmail, matchedFac),
+            facultyId: assignedFacId,
+            department: matchedFac ? matchedFac.department : department,
+            employeeId: matchedFac?.employeeId || 'DC-EMP-001',
+            isVerified: true,
+          };
 
       setFacultyName(newUser.name);
       onLoginSuccess(newUser, `token_${Date.now()}`);

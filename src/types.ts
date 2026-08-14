@@ -54,6 +54,7 @@ export interface User {
   role: Role;
   facultyId?: string;
   department: string;
+  designation?: string;
   phone?: string;
   whatsappPhone?: string;
   employeeId?: string;

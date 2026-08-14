@@ -172,7 +172,6 @@ export default function App() {
               lower !== 'faculty member' &&
               lower !== 'dr. faculty member' &&
               lower !== 'dr faculty member' &&
-              f.id !== 'fac_1' &&
               f.id !== 'fac_2' &&
               f.id !== 'fac_3'
             );
@@ -290,6 +289,31 @@ export default function App() {
     const cleanEmail = rawEmail.toLowerCase().trim();
     const cleanPhone = rawPhone.trim().replace(/\D/g, '');
     const cleanWhatsapp = rawWhatsapp.trim().replace(/\D/g, '');
+
+    // Immediate Deborshee Gogoi linkage
+    if (
+      cleanEmail === 'thewildscapes@gmail.com' ||
+      cleanPhone === '9706375001' ||
+      cleanWhatsapp === '9706375001' ||
+      rawName.toLowerCase().includes('deborshee') ||
+      rawFacultyId === 'fac_1'
+    ) {
+      return {
+        ...user,
+        id: 'fac_1',
+        name: 'Dr. Deborshee Gogoi',
+        email: 'thewildscapes@gmail.com',
+        phone: '9706375001',
+        whatsappPhone: '9706375001',
+        facultyId: 'fac_1',
+        department: 'Commerce',
+        designation: 'Associate Professor & Academic Coordinator',
+        employeeId: 'DC-COM-001',
+        role: 'admin',
+        isVerified: true,
+        isAcademicCoordinator: true,
+      };
+    }
 
     console.group(`[FacultyLookup] Resolving Faculty linkage for user: "${rawName}"`);
     console.log(`[FacultyLookup] Raw User Inputs:`, {

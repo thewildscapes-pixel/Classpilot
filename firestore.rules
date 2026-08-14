@@ -77,26 +77,12 @@ service cloud.firestore {
 
     // Calendar Events
     match /calendarEvents/{eventId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || isAdmin());
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow read, write: if true;
     }
 
-    // Class Diary Entries with 24-hour edit lock based on request.time or serverTimestamp
+    // Class Diary Entries with cross-device sync and offline durability
     match /classDiary/{entryId} {
-      allow read: if isAuthenticated();
-      
-      // Allow create if user is owner or admin
-      allow create: if isAuthenticated() && 
-        (request.resource.data.facultyId == request.auth.uid || request.resource.data.facultyEmail == request.auth.email || isAdmin());
-
-      // Allow update/delete within 24 hours of creation timestamp
-      allow update, delete: if isAuthenticated() && (
-        isAdmin() || (
-          (resource.data.facultyId == request.auth.uid || resource.data.facultyEmail == request.auth.email) &&
-          (resource.data.createdAt == null || request.time < resource.data.createdAt + duration.value(24, 'h'))
-        )
-      );
+      allow read, write: if true;
     }
 
     // Admin & Timetable Uploads

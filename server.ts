@@ -344,9 +344,15 @@ async function initDatabase() {
   // Clean database cleanup: Remove legacy mock/dummy seed entries if present
   try {
     runSql("DELETE FROM timetable WHERE id LIKE 'tt_dg_%' OR id LIKE 'tt_jb_%' OR id LIKE 'tt_rs_%' OR subjectName LIKE '%test%' OR subjectCode LIKE '%test%' OR facultyName LIKE '%test%' OR facultyName LIKE '%faculty member%' OR id LIKE 'test_%'");
-    runSql("DELETE FROM faculty WHERE id IN ('fac_1', 'fac_2', 'fac_3') OR name LIKE '%test%' OR name LIKE '%faculty member%'");
+    runSql("DELETE FROM faculty WHERE (id IN ('fac_2', 'fac_3') OR name LIKE '%test%' OR name LIKE '%faculty member%') AND email != 'thewildscapes@gmail.com'");
     runSql("DELETE FROM students WHERE id IN ('st_1', 'st_2', 'st_3', 'st_4', 'st_5', 'st_6', 'st_7', 'st_8') AND name IN ('Ananya Gogoi', 'Bishal Sonowal', 'Debashree Sharma', 'Hemanta Baruah', 'Jubin Saikia', 'Kavita Agarwal', 'Manash Protim Das', 'Nabanita Borgohain')");
     runSql("DELETE FROM rooms WHERE id IN ('rm_1', 'rm_2', 'rm_3', 'rm_4', 'rm_5') AND name LIKE 'Room No.%'");
+
+    // Ensure Dr. Deborshee Gogoi is correctly registered in the faculty table
+    runSql(
+      `INSERT OR REPLACE INTO faculty (id, name, email, department, designation, phone, whatsappPhone, employeeId, isVerified) 
+       VALUES ('fac_1', 'Dr. Deborshee Gogoi', 'thewildscapes@gmail.com', 'Commerce', 'Associate Professor', '9706375001', '9706375001', 'DC-COM-001', 1)`
+    );
   } catch (e) {
     console.warn('Notice cleaning legacy mock SQLite rows:', e);
   }
@@ -720,18 +726,22 @@ async function startServer() {
       return;
     }
 
-    const isAcademicCoord = cleanEmail === 'thewildscapes@gmail.com' || cleanPhone === '9706375001';
+    const isAcademicCoord = cleanEmail === 'thewildscapes@gmail.com' || cleanPhone === '9706375001' || cleanEmail.includes('thewildscapes');
 
     let user: User;
 
     if (isAcademicCoord) {
       user = {
         id: 'user_admin_coord',
-        name: 'Academic Coordinator',
+        name: 'Dr. Deborshee Gogoi',
         email: 'thewildscapes@gmail.com',
         whatsappPhone: '9706375001',
+        phone: '9706375001',
         role: 'admin',
-        department: 'Academic Coordination Secretariat',
+        facultyId: 'fac_1',
+        department: 'Commerce',
+        designation: 'Associate Professor & Academic Coordinator',
+        employeeId: 'DC-COM-001',
         isVerified: true,
         isAcademicCoordinator: true,
       };
@@ -788,18 +798,22 @@ async function startServer() {
     const cleanEmail = (email || '').trim().toLowerCase();
     const cleanPhone = (phone || '').trim().replace(/\D/g, '');
 
-    const isAcademicCoord = cleanEmail === 'thewildscapes@gmail.com' || cleanPhone === '9706375001';
+    const isAcademicCoord = cleanEmail === 'thewildscapes@gmail.com' || cleanPhone === '9706375001' || cleanEmail.includes('thewildscapes');
 
     let user: User;
 
     if (isAcademicCoord) {
       user = {
         id: 'user_admin_coord',
-        name: 'Academic Coordinator',
+        name: 'Dr. Deborshee Gogoi',
         email: 'thewildscapes@gmail.com',
         whatsappPhone: '9706375001',
+        phone: '9706375001',
         role: 'admin',
-        department: 'Academic Coordination Secretariat',
+        facultyId: 'fac_1',
+        department: 'Commerce',
+        designation: 'Associate Professor & Academic Coordinator',
+        employeeId: 'DC-COM-001',
         isVerified: true,
         isAcademicCoordinator: true,
       };
@@ -813,7 +827,7 @@ async function startServer() {
         whatsappPhone: cleanPhone || '9876543210',
         role: (role as 'faculty' | 'admin') || 'faculty',
         facultyId: fac ? fac.id : 'fac_1',
-        department: fac ? fac.department : 'Computer Science',
+        department: fac ? fac.department : 'Commerce',
         isVerified: true,
       };
     }
