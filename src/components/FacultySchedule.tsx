@@ -1739,7 +1739,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                     required
                     value={editForm.subjectName}
                     onChange={(e) => setEditForm({ ...editForm, subjectName: e.target.value })}
-                    placeholder="e.g. Financial Accounting"
+                    placeholder="e.g. Course Title / Paper Name"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -1750,7 +1750,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                     required
                     value={editForm.subjectCode}
                     onChange={(e) => setEditForm({ ...editForm, subjectCode: e.target.value })}
-                    placeholder="e.g. COM101"
+                    placeholder="e.g. SUBJ101"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
                 </div>

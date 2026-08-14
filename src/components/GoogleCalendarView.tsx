@@ -283,7 +283,10 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
             <button
               onClick={() => {
                 if (onTriggerAlarm) {
-                  onTriggerAlarm('COM-101 Financial Accounting', 'Lecture Hall 01', '09:00 AM');
+                  const targetSubj = timetable[0]?.subjectName ? `${timetable[0]?.subjectCode ? timetable[0].subjectCode + ' ' : ''}${timetable[0].subjectName}` : 'Class Period Lecture';
+                  const targetRoom = timetable[0]?.room || 'Lecture Hall';
+                  const targetTime = timetable[0]?.startTime || '09:00 AM';
+                  onTriggerAlarm(targetSubj, targetRoom, targetTime);
                 }
               }}
               className="w-full py-3 bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-white font-extrabold text-xs rounded-xl shadow-lg flex items-center justify-center space-x-2 transition-all"

@@ -539,19 +539,19 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const handleDownloadStudentRosterExcelTemplate = () => {
     const templateData = [
       {
-        'Roll No.': 'COM-2025-01',
+        'Roll No.': 'STU-2025-01',
         'Enrolment No.': 'EN202500123',
-        'Student Name': 'Ananya Gogoi',
-        'Class': 'FYUGP 1st Sem Commerce',
-        'Subject Selection': 'COM101 - Financial Accounting',
+        'Student Name': 'Student Name 1',
+        'Class': 'FYUGP 1st Sem',
+        'Subject Selection': 'SUBJ101 - Core Course 1',
         'Academic Year': sessionAcademicYear,
       },
       {
-        'Roll No.': 'COM-2025-02',
+        'Roll No.': 'STU-2025-02',
         'Enrolment No.': 'EN202500124',
-        'Student Name': 'Bishal Sonowal',
-        'Class': 'FYUGP 1st Sem Commerce',
-        'Subject Selection': 'COM102 - Business Law',
+        'Student Name': 'Student Name 2',
+        'Class': 'FYUGP 1st Sem',
+        'Subject Selection': 'SUBJ102 - Core Course 2',
         'Academic Year': sessionAcademicYear,
       },
     ];
@@ -790,10 +790,10 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         'End Time': '09:00',
         'Teacher / Faculty Name': 'Faculty Member 1',
         'Faculty ID': 'EMP-001',
-        'Subject Code': 'COM101-MAJ',
-        'Subject Name': 'Financial Accounting',
+        'Subject Code': 'MAJ101',
+        'Subject Name': 'Major Course 1',
         'Classroom / Room': 'Room No. C1',
-        'Class / Batch': 'FYUGP 1st Sem Commerce',
+        'Class / Batch': 'FYUGP 1st Sem',
         'Department': 'Commerce',
         'Paper Category': 'Major',
         'Semester Cycle': activeSemesterCycle,
@@ -808,10 +808,10 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
         'End Time': '10:00',
         'Teacher / Faculty Name': 'Faculty Member 2',
         'Faculty ID': 'EMP-002',
-        'Subject Code': 'COM102-MIN',
-        'Subject Name': 'Business Organisation',
+        'Subject Code': 'MIN101',
+        'Subject Name': 'Minor Course 1',
         'Classroom / Room': 'Room No. C4',
-        'Class / Batch': 'FYUGP 1st Sem Commerce',
+        'Class / Batch': 'FYUGP 1st Sem',
         'Department': 'Commerce',
         'Paper Category': 'Minor',
         'Semester Cycle': activeSemesterCycle,
@@ -878,14 +878,14 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
   const [formProgramSemester, setFormProgramSemester] = useState<string>('FYUGP 1st Semester');
   const [formPaperCategory, setFormPaperCategory] = useState<string>('Major');
   const [formFacultyId, setFormFacultyId] = useState<string>(facultyList[0]?.id || '');
-  const [formSubjectCode, setFormSubjectCode] = useState<string>('COM101-MAJ');
-  const [formSubjectName, setFormSubjectName] = useState<string>('Financial Accounting');
-  const [formRoom, setFormRoom] = useState<string>('Room No. C1');
+  const [formSubjectCode, setFormSubjectCode] = useState<string>('');
+  const [formSubjectName, setFormSubjectName] = useState<string>('');
+  const [formRoom, setFormRoom] = useState<string>(roomList[0]?.roomNumber || 'Room No. C1');
   const [formDay, setFormDay] = useState<DayOfWeek>('Monday');
   const [formStartTime, setFormStartTime] = useState<string>('08:00');
   const [formEndTime, setFormEndTime] = useState<string>('09:00');
-  const [formBatch, setFormBatch] = useState<string>('FYUGP 1st Sem CS');
-  const [formDepartment, setFormDepartment] = useState<string>('Computer Science');
+  const [formBatch, setFormBatch] = useState<string>('');
+  const [formDepartment, setFormDepartment] = useState<string>(facultyList[0]?.department || 'Commerce');
   const [formNotes, setFormNotes] = useState<string>('');
 
   // Import Preview State
@@ -1616,14 +1616,14 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
     setFormProgramSemester(selectedProgramSemester !== 'All' ? selectedProgramSemester : currentProgramList[0]);
     setFormPaperCategory('Major');
     setFormFacultyId(defaultFac?.id || (facultyList.length > 0 ? facultyList[0].id : 'fac_unassigned'));
-    setFormSubjectCode('COM101-MAJ');
-    setFormSubjectName('Financial Accounting');
-    setFormRoom('Room No. C1');
+    setFormSubjectCode('');
+    setFormSubjectName('');
+    setFormRoom(roomList[0]?.roomNumber || 'Room No. C1');
     setFormDay(day || 'Monday');
     setFormStartTime(slotStartTime || '08:00');
     setFormEndTime(slotEndTime || '09:00');
-    setFormBatch('FYUGP 1st Sem CS');
-    setFormDepartment(selectedDepartment !== 'All' ? selectedDepartment : defaultFac?.department || 'Computer Science');
+    setFormBatch('');
+    setFormDepartment(selectedDepartment !== 'All' ? selectedDepartment : defaultFac?.department || 'Commerce');
     setFormNotes('');
     setIsEntryModalOpen(true);
   };
@@ -5341,12 +5341,12 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {[
-                    { code: 'COM101', name: 'Financial Accounting' },
-                    { code: 'COM102', name: 'Business Law' },
-                    { code: 'ECO101', name: 'Microeconomics' },
+                    { code: 'MAJ101', name: 'Major Core Course' },
+                    { code: 'MIN101', name: 'Minor Paper' },
                     { code: 'MDC101', name: 'Multidisciplinary Course' },
-                    { code: 'VOC101', name: 'Vocational Skill Paper' },
-                    { code: 'PG101', name: 'Advanced Financial Management' },
+                    { code: 'AEC101', name: 'Ability Enhancement' },
+                    { code: 'SEC101', name: 'Skill Enhancement Course' },
+                    { code: 'VAC101', name: 'Value Added Course' },
                   ].map((sub) => (
                     <button
                       type="button"
@@ -5898,9 +5898,9 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                 onChange={(e) => setJsonSyncInput(e.target.value)}
                 placeholder={`[
   {
-    "subjectCode": "COM101",
-    "subjectName": "Financial Accounting",
-    "facultyName": "Faculty Member 1",
+    "subjectCode": "SUBJ101",
+    "subjectName": "Subject Title",
+    "facultyName": "Faculty Name",
     "day": "Monday",
     "startTime": "09:00",
     "endTime": "10:00",

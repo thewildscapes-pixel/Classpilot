@@ -329,7 +329,7 @@ export function isPhoneMatch(p1?: string, p2?: string): boolean {
 
 export function generateSampleCsvContent(): string {
   return `Faculty ID,Faculty Name,Department,Subject Code,Subject Name,Room,Day,Start Time,End Time,Batch
-EMP-001,Faculty Member 1,Commerce,COM101,Financial Accounting,Room No. C1,Monday,08:00,09:00,FYUGP 1st Sem Commerce
-EMP-002,Faculty Member 2,Commerce,COM102,Business Law,Room No. C4,Monday,09:00,10:00,FYUGP 1st Sem Commerce
+EMP-001,Faculty Member 1,Commerce,MAJ101,Major Course 1,Room No. C1,Monday,08:00,09:00,FYUGP 1st Sem
+EMP-002,Faculty Member 2,Commerce,MIN101,Minor Course 1,Room No. C4,Monday,09:00,10:00,FYUGP 1st Sem
 `;
 }
