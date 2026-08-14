@@ -62,7 +62,18 @@ interface ClassDiaryViewProps {
 
 const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [];
 
-const DEFAULT_STUDENTS: { studentId: string; rollNo: string; name: string }[] = [];
+const isExcludedSubject = (name?: string, code?: string): boolean => {
+  const text = `${name || ''} ${code || ''}`.toLowerCase().replace(/[^a-z0-9]/g, ' ');
+  return (
+    text.includes('financial account') ||
+    text.includes('organisation behav') ||
+    text.includes('organization behav') ||
+    text.includes('organisational behav') ||
+    text.includes('organizational behav') ||
+    text.includes('business organis') ||
+    text.includes('business organiz')
+  );
+};
 
 export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   currentUser,
@@ -79,7 +90,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed
-            .filter((e: any) => e && e.subjectName !== 'Financial Accounting' && e.subjectName !== 'Business Organisation')
+            .filter((e: any) => e && !isExcludedSubject(e.subjectName, e.subjectCode))
             .map((e: any) => ({
               ...e,
               batch: e.batch || e.classBatch || '',
@@ -107,32 +118,42 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [offlineDrafts, setOfflineDrafts] = useState<ClassDiaryEntry[]>([]);
 
-  // Dynamically extract available unique subjects from timetable and active diary entries
+  // Dynamically extract unique subjects strictly from the master routine (timetable)
   const availableSubjects = useMemo(() => {
-    const subjectsMap = new Map<string, string>();
-    timetable.forEach((t) => {
-      if (t.subjectCode && t.subjectName) {
-        subjectsMap.set(t.subjectCode, `${t.subjectCode}: ${t.subjectName}`);
-      } else if (t.subjectName) {
-        subjectsMap.set(t.subjectName, t.subjectName);
+    const subjectsMap = new Map<string, { code: string; name: string; label: string; batch?: string; room?: string }>();
+    (timetable || []).forEach((t) => {
+      const code = t.subjectCode?.trim() || '';
+      const name = t.subjectName?.trim() || '';
+      if (!name && !code) return;
+      if (isExcludedSubject(name, code)) return;
+
+      const key = code || name;
+      if (!subjectsMap.has(key)) {
+        subjectsMap.set(key, {
+          code: key,
+          name: name || code,
+          label: code && name && code !== name ? `${code}: ${name}` : (name || code),
+          batch: t.batch || '',
+          room: t.room || '',
+        });
       }
     });
-    diaryEntries.forEach((d) => {
-      if (d.subjectCode && d.subjectName) {
-        subjectsMap.set(d.subjectCode, `${d.subjectCode}: ${d.subjectName}`);
-      } else if (d.subjectName) {
-        subjectsMap.set(d.subjectName, d.subjectName);
-      }
-    });
-    return Array.from(subjectsMap.entries()).map(([code, label]) => ({ code, label }));
-  }, [timetable, diaryEntries]);
+    return Array.from(subjectsMap.values());
+  }, [timetable]);
 
   // Selected subject display label
   const selectedSubjectLabel = useMemo(() => {
     if (filterSubject === 'All') return 'All Subjects';
-    const found = availableSubjects.find((s) => s.code === filterSubject);
+    const found = availableSubjects.find((s) => s.code === filterSubject || s.name === filterSubject);
     return found ? found.label : filterSubject;
   }, [filterSubject, availableSubjects]);
+
+  // Reset filter if active subject is no longer in master routine
+  useEffect(() => {
+    if (filterSubject !== 'All' && !availableSubjects.some((s) => s.code === filterSubject || s.name === filterSubject)) {
+      setFilterSubject('All');
+    }
+  }, [availableSubjects, filterSubject]);
 
   // Dynamic time frame display label
   const timeFrameLabel = useMemo(() => {
@@ -207,7 +228,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const mergeEntries = (existing: ClassDiaryEntry[], incoming: ClassDiaryEntry[]): ClassDiaryEntry[] => {
     const entryMap = new Map<string, ClassDiaryEntry>();
     existing.forEach((e) => {
-      if (e && e.id) {
+      if (e && e.id && !isExcludedSubject(e.subjectName, e.subjectCode)) {
         entryMap.set(e.id, {
           ...e,
           batch: e.batch || (e as any).classBatch || '',
@@ -224,7 +245,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       }
     });
     incoming.forEach((e) => {
-      if (e && e.id) {
+      if (e && e.id && !isExcludedSubject(e.subjectName, e.subjectCode)) {
         const prev = entryMap.get(e.id);
         entryMap.set(e.id, {
           ...prev,
@@ -256,14 +277,18 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
+  // Manual Student Entry input state in modal
+  const [manualRollNo, setManualRollNo] = useState<string>('');
+  const [manualStudentName, setManualStudentName] = useState<string>('');
+
   // Form Fields - initialized dynamically from active timetable entries if available
   const [formDate, setFormDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [formStartTime, setFormStartTime] = useState<string>('09:00');
   const [formEndTime, setFormEndTime] = useState<string>('10:00');
-  const [formSubjectCode, setFormSubjectCode] = useState<string>(timetable[0]?.subjectCode || '');
-  const [formSubjectName, setFormSubjectName] = useState<string>(timetable[0]?.subjectName || '');
-  const [formBatch, setFormBatch] = useState<string>(timetable[0]?.batch || '');
-  const [formRoom, setFormRoom] = useState<string>(timetable[0]?.room || '');
+  const [formSubjectCode, setFormSubjectCode] = useState<string>(availableSubjects[0]?.code || timetable[0]?.subjectCode || '');
+  const [formSubjectName, setFormSubjectName] = useState<string>(availableSubjects[0]?.name || timetable[0]?.subjectName || '');
+  const [formBatch, setFormBatch] = useState<string>(availableSubjects[0]?.batch || timetable[0]?.batch || '');
+  const [formRoom, setFormRoom] = useState<string>(availableSubjects[0]?.room || timetable[0]?.room || '');
   const [formTopic, setFormTopic] = useState<string>('');
   const [formSyllabusUnit, setFormSyllabusUnit] = useState<string>('');
   const [formDuration, setFormDuration] = useState<number>(60);
@@ -285,7 +310,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       setFormSyllabusUnit('');
       setFormDuration(60);
       setFormRemarks('');
-      setFormAttendance(DEFAULT_STUDENTS.map(s => ({ ...s, status: 'Present' })));
+      setFormAttendance([]);
       setIsModalOpen(true);
     }
   }, [selectedClassForDiary]);
@@ -318,7 +343,8 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       currentUser.role === 'admin',
       (entries) => {
         if (entries && entries.length > 0) {
-          setDiaryEntries((prev) => mergeEntries(prev, entries));
+          const nonExcluded = entries.filter((e) => !isExcludedSubject(e.subjectName, e.subjectCode));
+          setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
         }
       }
     );
@@ -335,7 +361,8 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
-          setDiaryEntries((prev) => mergeEntries(prev, data));
+          const nonExcluded = data.filter((e: any) => !isExcludedSubject(e.subjectName, e.subjectCode));
+          setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
         } else {
           loadLocalDiaryEntries();
         }
@@ -354,7 +381,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const valid = parsed.filter((e: any) => e && e.subjectName !== 'Financial Accounting' && e.subjectName !== 'Business Organisation');
+          const valid = parsed.filter((e: any) => e && !isExcludedSubject(e.subjectName, e.subjectCode));
           if (valid.length > 0) {
             setDiaryEntries((prev) => mergeEntries(prev, valid));
             return;
@@ -362,180 +389,6 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
         }
       }
     } catch (err) {}
-
-    // Seed realistic class entries across August, September, and October 2026 matching faculty timetable
-    const sampleEntries: ClassDiaryEntry[] = [
-      {
-        id: 'diary_2026_08_14',
-        facultyId: currentUser.facultyId || currentUser.id || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: '2026-08-14',
-        startTime: '13:00',
-        endTime: '14:00',
-        classStartTimestamp: new Date('2026-08-14T13:00:00').getTime(),
-        subjectCode: 'POM',
-        subjectName: 'Principles of Marketing',
-        batch: 'FYUGP 5th Semester 2026',
-        room: 'Room C9',
-        topicTaught: 'Characteristics of Marketing & Core Marketing Concepts',
-        syllabusUnit: 'Unit 1: Fundamentals of Marketing',
-        durationMins: 60,
-        remarks: 'Analyzed modern holistic marketing orientation and customer value creation.',
-        attendance: [
-          { studentId: 's1', rollNo: 'COM-001', name: 'Aakash Sharma', status: 'Present' },
-          { studentId: 's2', rollNo: 'COM-002', name: 'Bhavna Baruah', status: 'Present' },
-          { studentId: 's3', rollNo: 'COM-003', name: 'Chiranjit Das', status: 'Present' },
-          { studentId: 's4', rollNo: 'COM-004', name: 'Deepika Saikia', status: 'Present' },
-          { studentId: 's5', rollNo: 'COM-005', name: 'Farhan Ali', status: 'Absent' },
-        ],
-        createdAt: '2026-08-14T14:15:00Z',
-        updatedAt: '2026-08-14T14:15:00Z',
-        isSynced: true,
-      },
-      {
-        id: 'diary_2026_08_21',
-        facultyId: currentUser.facultyId || currentUser.id || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: '2026-08-21',
-        startTime: '13:00',
-        endTime: '14:00',
-        classStartTimestamp: new Date('2026-08-21T13:00:00').getTime(),
-        subjectCode: 'POM',
-        subjectName: 'Principles of Marketing',
-        batch: 'FYUGP 5th Semester 2026',
-        room: 'Room C9',
-        topicTaught: 'Consumer Behaviour, Perception & Market Segmentation Strategies',
-        syllabusUnit: 'Unit 1: Market Dynamics',
-        durationMins: 60,
-        remarks: 'Discussed demographic, geographic and psychographic segmentation in NE India.',
-        attendance: [
-          { studentId: 's1', rollNo: 'COM-001', name: 'Aakash Sharma', status: 'Present' },
-          { studentId: 's2', rollNo: 'COM-002', name: 'Bhavna Baruah', status: 'Present' },
-          { studentId: 's3', rollNo: 'COM-003', name: 'Chiranjit Das', status: 'Present' },
-          { studentId: 's4', rollNo: 'COM-004', name: 'Deepika Saikia', status: 'Present' },
-          { studentId: 's5', rollNo: 'COM-005', name: 'Farhan Ali', status: 'Present' },
-        ],
-        createdAt: '2026-08-21T14:20:00Z',
-        updatedAt: '2026-08-21T14:20:00Z',
-        isSynced: true,
-      },
-      {
-        id: 'diary_2026_09_04',
-        facultyId: currentUser.facultyId || currentUser.id || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: '2026-09-04',
-        startTime: '13:00',
-        endTime: '14:00',
-        classStartTimestamp: new Date('2026-09-04T13:00:00').getTime(),
-        subjectCode: 'POM',
-        subjectName: 'Principles of Marketing',
-        batch: 'FYUGP 5th Semester 2026',
-        room: 'Room C9',
-        topicTaught: 'Product Life Cycle (PLC) Stages & Brand Positioning Models',
-        syllabusUnit: 'Unit 2: Product & Branding',
-        durationMins: 60,
-        remarks: 'Case study analysis on maturity and decline stage repositioning.',
-        attendance: [
-          { studentId: 's1', rollNo: 'COM-001', name: 'Aakash Sharma', status: 'Present' },
-          { studentId: 's2', rollNo: 'COM-002', name: 'Bhavna Baruah', status: 'Present' },
-          { studentId: 's3', rollNo: 'COM-003', name: 'Chiranjit Das', status: 'Absent' },
-          { studentId: 's4', rollNo: 'COM-004', name: 'Deepika Saikia', status: 'Present' },
-          { studentId: 's5', rollNo: 'COM-005', name: 'Farhan Ali', status: 'Present' },
-        ],
-        createdAt: '2026-09-04T14:10:00Z',
-        updatedAt: '2026-09-04T14:10:00Z',
-        isSynced: true,
-      },
-      {
-        id: 'diary_2026_09_18',
-        facultyId: currentUser.facultyId || currentUser.id || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: '2026-09-18',
-        startTime: '13:00',
-        endTime: '14:00',
-        classStartTimestamp: new Date('2026-09-18T13:00:00').getTime(),
-        subjectCode: 'POM',
-        subjectName: 'Principles of Marketing',
-        batch: 'FYUGP 5th Semester 2026',
-        room: 'Room C9',
-        topicTaught: 'Pricing Strategies: Cost-Plus, Penetration & Price Skimming',
-        syllabusUnit: 'Unit 3: Pricing Policies',
-        durationMins: 60,
-        remarks: 'Solved numerical problems on break-even points and markup percentages.',
-        attendance: [
-          { studentId: 's1', rollNo: 'COM-001', name: 'Aakash Sharma', status: 'Present' },
-          { studentId: 's2', rollNo: 'COM-002', name: 'Bhavna Baruah', status: 'Present' },
-          { studentId: 's3', rollNo: 'COM-003', name: 'Chiranjit Das', status: 'Present' },
-          { studentId: 's4', rollNo: 'COM-004', name: 'Deepika Saikia', status: 'Present' },
-          { studentId: 's5', rollNo: 'COM-005', name: 'Farhan Ali', status: 'Present' },
-        ],
-        createdAt: '2026-09-18T14:30:00Z',
-        updatedAt: '2026-09-18T14:30:00Z',
-        isSynced: true,
-      },
-      {
-        id: 'diary_2026_10_09',
-        facultyId: currentUser.facultyId || currentUser.id || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: '2026-10-09',
-        startTime: '13:00',
-        endTime: '14:00',
-        classStartTimestamp: new Date('2026-10-09T13:00:00').getTime(),
-        subjectCode: 'POM',
-        subjectName: 'Principles of Marketing',
-        batch: 'FYUGP 5th Semester 2026',
-        room: 'Room C9',
-        topicTaught: 'Integrated Marketing Communication (IMC) & Digital Promotion Mix',
-        syllabusUnit: 'Unit 4: Promotion & Digital Channels',
-        durationMins: 60,
-        remarks: 'Compared social media advertising ROI vs traditional print media.',
-        attendance: [
-          { studentId: 's1', rollNo: 'COM-001', name: 'Aakash Sharma', status: 'Present' },
-          { studentId: 's2', rollNo: 'COM-002', name: 'Bhavna Baruah', status: 'Present' },
-          { studentId: 's3', rollNo: 'COM-003', name: 'Chiranjit Das', status: 'Present' },
-          { studentId: 's4', rollNo: 'COM-004', name: 'Deepika Saikia', status: 'Present' },
-          { studentId: 's5', rollNo: 'COM-005', name: 'Farhan Ali', status: 'Present' },
-        ],
-        createdAt: '2026-10-09T14:15:00Z',
-        updatedAt: '2026-10-09T14:15:00Z',
-        isSynced: true,
-      },
-      {
-        id: 'diary_2026_10_23',
-        facultyId: currentUser.facultyId || currentUser.id || 'fac_1',
-        facultyName: currentUser.name || 'Dr. Deborshee Gogoi',
-        department: currentUser.department || 'Commerce',
-        date: '2026-10-23',
-        startTime: '13:00',
-        endTime: '14:00',
-        classStartTimestamp: new Date('2026-10-23T13:00:00').getTime(),
-        subjectCode: 'POM',
-        subjectName: 'Principles of Marketing',
-        batch: 'FYUGP 5th Semester 2026',
-        room: 'Room C9',
-        topicTaught: 'Distribution Channels, Logistics & Retail Supply Chains in India',
-        syllabusUnit: 'Unit 4: Distribution Logistics',
-        durationMins: 60,
-        remarks: 'Case study on Assam Tea and FMCG wholesale distribution.',
-        attendance: [
-          { studentId: 's1', rollNo: 'COM-001', name: 'Aakash Sharma', status: 'Present' },
-          { studentId: 's2', rollNo: 'COM-002', name: 'Bhavna Baruah', status: 'Present' },
-          { studentId: 's3', rollNo: 'COM-003', name: 'Chiranjit Das', status: 'Present' },
-          { studentId: 's4', rollNo: 'COM-004', name: 'Deepika Saikia', status: 'Present' },
-          { studentId: 's5', rollNo: 'COM-005', name: 'Farhan Ali', status: 'Absent' },
-        ],
-        createdAt: '2026-10-23T14:05:00Z',
-        updatedAt: '2026-10-23T14:05:00Z',
-        isSynced: true,
-      },
-    ];
-
-    setDiaryEntries((prev) => mergeEntries(prev, sampleEntries));
   };
 
   const loadOfflineDrafts = () => {
@@ -649,21 +502,22 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       setFormSyllabusUnit(entry.syllabusUnit || '');
       setFormDuration(entry.durationMins);
       setFormRemarks(entry.remarks || '');
-      setFormAttendance(entry.attendance || DEFAULT_STUDENTS.map(s => ({ ...s, status: 'Present' })));
+      setFormAttendance(entry.attendance || []);
     } else {
+      const defaultSubj = availableSubjects[0];
       setEditingEntryId(null);
       setFormDate(new Date().toISOString().split('T')[0]);
       setFormStartTime('09:00');
       setFormEndTime('10:00');
-      setFormSubjectCode(timetable[0]?.subjectCode || '');
-      setFormSubjectName(timetable[0]?.subjectName || '');
-      setFormBatch(timetable[0]?.batch || '');
-      setFormRoom(timetable[0]?.room || '');
+      setFormSubjectCode(defaultSubj?.code || timetable[0]?.subjectCode || '');
+      setFormSubjectName(defaultSubj?.name || timetable[0]?.subjectName || '');
+      setFormBatch(defaultSubj?.batch || timetable[0]?.batch || '');
+      setFormRoom(defaultSubj?.room || timetable[0]?.room || '');
       setFormTopic('');
       setFormSyllabusUnit('');
       setFormDuration(60);
       setFormRemarks('');
-      setFormAttendance(DEFAULT_STUDENTS.map(s => ({ ...s, status: 'Present' })));
+      setFormAttendance([]);
     }
     setIsModalOpen(true);
   };
@@ -1728,15 +1582,25 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                           )}
                         </div>
 
-                        {!lockInfo.isLocked && (
+                        <div className="flex items-center space-x-1.5">
                           <button
                             onClick={() => handleOpenModal(entry)}
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 transition-colors"
-                            title="Edit Entry"
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 text-xs font-bold transition-colors flex items-center space-x-1"
+                            title="Update Attendance & Entry Details"
                           >
-                            <Edit2 className="w-4 h-4" />
+                            <Users className="w-3.5 h-3.5" />
+                            <span>Update Attendance</span>
                           </button>
-                        )}
+                          {!lockInfo.isLocked && (
+                            <button
+                              onClick={() => handleOpenModal(entry)}
+                              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-colors"
+                              title="Edit Entry"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -2129,23 +1993,46 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Subject Code & Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Course Code - Course Title"
-                    value={formSubjectCode && formSubjectName ? `${formSubjectCode} - ${formSubjectName}` : (formSubjectName || formSubjectCode || '')}
-                    onChange={(e) => {
-                      const parts = e.target.value.split('-');
-                      if (parts.length > 1) {
-                        setFormSubjectCode(parts[0]?.trim() || '');
-                        setFormSubjectName(parts.slice(1).join('-').trim() || '');
-                      } else {
-                        setFormSubjectName(e.target.value);
-                      }
-                    }}
-                    className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
-                    required
-                  />
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                    Subject (from Master Routine) *
+                  </label>
+                  {availableSubjects.length > 0 ? (
+                    <select
+                      value={formSubjectCode || formSubjectName || ''}
+                      onChange={(e) => {
+                        const selectedVal = e.target.value;
+                        const matched = availableSubjects.find(
+                          (s) => s.code === selectedVal || s.name === selectedVal
+                        );
+                        if (matched) {
+                          setFormSubjectCode(matched.code);
+                          setFormSubjectName(matched.name);
+                          if (!formBatch || formBatch === availableSubjects[0]?.batch) {
+                            setFormBatch(matched.batch || '');
+                          }
+                          if (!formRoom || formRoom === availableSubjects[0]?.room) {
+                            setFormRoom(matched.room || '');
+                          }
+                        } else {
+                          setFormSubjectCode(selectedVal);
+                          setFormSubjectName(selectedVal);
+                        }
+                      }}
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                      required
+                    >
+                      <option value="" disabled>-- Select Subject from Routine --</option>
+                      {availableSubjects.map((s) => (
+                        <option key={s.code} value={s.code}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="w-full bg-slate-800/80 border border-amber-500/40 text-amber-300 text-xs rounded-xl p-2.5">
+                      No subjects in Master Routine. Add or import routine in Timetable tab.
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Batch / Semester</label>
@@ -2175,7 +2062,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                 <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Mapped Syllabus Unit</label>
                 <input
                   type="text"
-                  placeholder="e.g. Unit 1: Accounting Framework"
+                  placeholder="e.g. Unit 1: Core Concepts & Principles"
                   value={formSyllabusUnit}
                   onChange={(e) => setFormSyllabusUnit(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
@@ -2184,19 +2071,19 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
               {/* Student Attendance Marking Grid */}
               <div className="space-y-2">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <label className="text-[10px] font-bold uppercase text-slate-400 block">
-                    Mark Class Student Attendance ({formAttendance.filter(a => a.status === 'Present').length}/{formAttendance.length} Present)
+                    Student Attendance ({formAttendance.filter(a => a.status === 'Present').length}/{formAttendance.length} Present)
                   </label>
 
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <button
                       type="button"
                       onClick={handleImportRosterForCurrentClass}
                       className="px-2.5 py-1 bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-lg text-[10px] font-bold flex items-center space-x-1 transition-all cursor-pointer"
                     >
                       <UserCheck className="w-3 h-3" />
-                      <span>Import Student Roster</span>
+                      <span>Import Roster</span>
                     </button>
 
                     <button
@@ -2218,13 +2105,64 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                     >
                       All Absent
                     </button>
+
+                    {formAttendance.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormAttendance([])}
+                        className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-bold rounded-lg border border-red-500/30"
+                      >
+                        Clear List
+                      </button>
+                    )}
                   </div>
+                </div>
+
+                {/* Add Custom Student to List */}
+                <div className="flex items-center space-x-2 bg-slate-800/60 p-2 rounded-xl border border-slate-700">
+                  <input
+                    type="text"
+                    placeholder="Roll No (e.g. COM-01)"
+                    value={manualRollNo}
+                    onChange={(e) => setManualRollNo(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-white text-[11px] rounded-lg px-2.5 py-1 w-28 focus:outline-none focus:border-blue-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Student Full Name"
+                    value={manualStudentName}
+                    onChange={(e) => setManualStudentName(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 text-white text-[11px] rounded-lg px-2.5 py-1 flex-1 focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!manualRollNo.trim() || !manualStudentName.trim()) {
+                        alert('Please provide both roll number and student name.');
+                        return;
+                      }
+                      const newStud: AttendanceRecord = {
+                        studentId: `cust_${Date.now()}`,
+                        rollNo: manualRollNo.trim(),
+                        name: manualStudentName.trim(),
+                        status: 'Present',
+                        remarks: '',
+                      };
+                      setFormAttendance((prev) => [...prev, newStud]);
+                      setManualRollNo('');
+                      setManualStudentName('');
+                    }}
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded-lg transition-all flex items-center space-x-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add Student</span>
+                  </button>
                 </div>
 
                 <div className="max-h-48 overflow-y-auto bg-slate-800/80 rounded-xl p-2 border border-slate-700 space-y-1.5">
                   {formAttendance.length === 0 ? (
                     <div className="p-4 text-center text-xs text-slate-400">
-                      No attendance list attached. Click <span className="text-emerald-400 font-bold">Import Student Roster</span> above to populate from uploaded class roster.
+                      No attendance records loaded. Teachers can click <span className="text-emerald-400 font-bold">Import Roster</span> or add individual students above.
                     </div>
                   ) : (
                     formAttendance.map((st, idx) => (
@@ -2237,14 +2175,14 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                         <div className="flex items-center space-x-2">
                           <input
                             type="text"
-                            placeholder="Remarks (e.g. Late 10m)"
+                            placeholder="Remarks"
                             value={st.remarks || ''}
                             onChange={(e) => {
                               const updated = [...formAttendance];
                               updated[idx].remarks = e.target.value;
                               setFormAttendance(updated);
                             }}
-                            className="bg-slate-800 border border-slate-700 text-[10px] text-slate-200 rounded px-2 py-1 focus:outline-none w-28"
+                            className="bg-slate-800 border border-slate-700 text-[10px] text-slate-200 rounded px-2 py-1 focus:outline-none w-24"
                           />
 
                           <div className="flex items-center space-x-1">
@@ -2273,6 +2211,16 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                               }`}
                             >
                               Absent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormAttendance((prev) => prev.filter((_, i) => i !== idx));
+                              }}
+                              className="p-1 text-slate-500 hover:text-red-400 rounded transition-all"
+                              title="Remove Student"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>

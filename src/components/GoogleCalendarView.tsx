@@ -13,6 +13,7 @@ import {
   Check,
   RefreshCw,
   X,
+  Trash2,
 } from 'lucide-react';
 
 interface GoogleCalendarViewProps {
@@ -21,42 +22,6 @@ interface GoogleCalendarViewProps {
   onTriggerAlarm?: (eventTitle: string, room: string, startTime: string) => void;
   onOpenSleepAlarmModal?: () => void;
 }
-
-const DEFAULT_EVENTS: CalendarEvent[] = [
-  {
-    id: 'cal_1',
-    title: 'Departmental Academic Committee Meeting',
-    date: new Date().toISOString().split('T')[0],
-    startTime: '14:00',
-    endTime: '15:00',
-    location: 'Conference Room 1',
-    description: 'Review of mid-term FYUGP internal assessment marks and syllabus completion.',
-    isGoogleSynced: true,
-    createdById: 'fac_1',
-  },
-  {
-    id: 'cal_2',
-    title: 'NAAC Steering Committee Review',
-    date: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    startTime: '11:00',
-    endTime: '12:30',
-    location: 'Principal Conference Room',
-    description: 'Final audit of departmental class record logbooks and research publications.',
-    isGoogleSynced: true,
-    createdById: 'fac_1',
-  },
-  {
-    id: 'cal_3',
-    title: 'Special Guest Lecture: Digital Banking Trends',
-    date: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0],
-    startTime: '10:00',
-    endTime: '12:00',
-    location: 'College Auditorium',
-    description: 'Keynote lecture for B.Com 5th Semester students.',
-    isGoogleSynced: true,
-    createdById: 'fac_1',
-  },
-];
 
 export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
   currentUser,
@@ -69,10 +34,10 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
       const saved = localStorage.getItem('classpilot_calendar_events');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (e) {}
-    return DEFAULT_EVENTS;
+    return [];
   });
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
@@ -95,7 +60,7 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
       const res = await fetch('/api/calendar/events');
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setEvents(data);
           try {
             localStorage.setItem('classpilot_calendar_events', JSON.stringify(data));
@@ -104,6 +69,24 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
       }
     } catch (e) {
       console.warn('Using local calendar events dataset.');
+    }
+  };
+
+  const handleDeleteCalendarEvent = async (id: string) => {
+    setEvents((prev) => {
+      const updated = prev.filter((e) => e.id !== id);
+      try {
+        localStorage.setItem('classpilot_calendar_events', JSON.stringify(updated));
+      } catch (err) {}
+      return updated;
+    });
+
+    try {
+      await fetch(`/api/calendar/events/${id}`, {
+        method: 'DELETE',
+      });
+    } catch (e) {
+      console.warn('Backend delete sync failed, removed locally');
     }
   };
 
@@ -204,68 +187,92 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
           </div>
 
           <div className="space-y-3">
-            {events.map((evt) => (
-              <div
-                key={evt.id}
-                className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-              >
-                <div className="flex items-start space-x-3">
-                  <div className="w-12 h-12 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex flex-col items-center justify-center shrink-0 text-blue-300">
-                    <span className="text-[10px] uppercase font-mono font-bold">
-                      {new Date(evt.date).toLocaleString('default', { month: 'short' })}
-                    </span>
-                    <span className="text-sm font-black">
-                      {new Date(evt.date).getDate()}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="font-extrabold text-sm text-white">{evt.title}</h4>
-                      {evt.isGoogleSynced && (
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
-                          Synced
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <span className="flex items-center space-x-1">
-                        <Clock className="w-3 h-3 text-slate-500" />
-                        <span>{evt.startTime} - {evt.endTime}</span>
-                      </span>
-
-                      {evt.location && (
-                        <span className="flex items-center space-x-1 text-slate-300">
-                          <MapPin className="w-3 h-3 text-emerald-400" />
-                          <span>{evt.location}</span>
-                        </span>
-                      )}
-                    </div>
-
-                    {evt.description && (
-                      <p className="text-xs text-slate-400 pt-1 line-clamp-2">
-                        {evt.description}
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-2 shrink-0">
-                  <button
-                    onClick={() => {
-                      if (onTriggerAlarm) {
-                        onTriggerAlarm(evt.title, evt.location || 'Dept', evt.startTime);
-                      }
-                    }}
-                    className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all"
-                  >
-                    <Bell className="w-3.5 h-3.5" />
-                    <span>Test Bell Alarm</span>
-                  </button>
-                </div>
+            {events.length === 0 ? (
+              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center space-y-3">
+                <Calendar className="w-10 h-10 text-slate-600 mx-auto" />
+                <h4 className="text-sm font-bold text-white">No Scheduled Calendar Events</h4>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  There are currently no scheduled meetings or activities. Click "Add to Google Calendar" above to schedule a new departmental activity or meeting.
+                </p>
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all inline-flex items-center space-x-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create First Event</span>
+                </button>
               </div>
-            ))}
+            ) : (
+              events.map((evt) => (
+                <div
+                  key={evt.id}
+                  className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-4 transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-start space-x-3">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex flex-col items-center justify-center shrink-0 text-blue-300">
+                      <span className="text-[10px] uppercase font-mono font-bold">
+                        {new Date(evt.date).toLocaleString('default', { month: 'short' })}
+                      </span>
+                      <span className="text-sm font-black">
+                        {new Date(evt.date).getDate()}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <h4 className="font-extrabold text-sm text-white">{evt.title}</h4>
+                        {evt.isGoogleSynced && (
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                            Synced
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="flex items-center space-x-1">
+                          <Clock className="w-3 h-3 text-slate-500" />
+                          <span>{evt.startTime} - {evt.endTime}</span>
+                        </span>
+
+                        {evt.location && (
+                          <span className="flex items-center space-x-1 text-slate-300">
+                            <MapPin className="w-3 h-3 text-emerald-400" />
+                            <span>{evt.location}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {evt.description && (
+                        <p className="text-xs text-slate-400 pt-1 line-clamp-2">
+                          {evt.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (onTriggerAlarm) {
+                          onTriggerAlarm(evt.title, evt.location || 'Dept', evt.startTime);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all"
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                      <span>Test Bell Alarm</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCalendarEvent(evt.id)}
+                      className="p-1.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 hover:border-red-500/30 rounded-xl transition-all"
+                      title="Delete Event"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 

@@ -1661,6 +1661,12 @@ async function startServer() {
     res.status(201).json(newEvt);
   });
 
+  app.delete('/api/calendar/events/:id', (req, res) => {
+    const { id } = req.params;
+    runSql('DELETE FROM calendar_events WHERE id = ?', [id]);
+    res.json({ success: true, message: 'Event deleted' });
+  });
+
   // --- RESEARCH SQLITE ROUTES ---
   app.get('/api/research', (req, res) => {
     const rows = queryAll('SELECT * FROM research_records ORDER BY year DESC, dateLogged DESC');
