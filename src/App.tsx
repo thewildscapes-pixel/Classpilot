@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   TimetableEntry,
   Faculty,
@@ -812,14 +812,28 @@ export default function App() {
     return () => clearInterval(interval);
   }, [realTimeOffsetMs]);
 
+  // --- RESOLVED ACTIVE FACULTY ---
+  const currentFaculty = useMemo(() => {
+    return facultyList.find((f) => f.id === selectedFacultyId) ||
+      (currentUser?.facultyId ? facultyList.find((f) => f.id === currentUser.facultyId) : undefined) ||
+      facultyList[0];
+  }, [facultyList, selectedFacultyId, currentUser]);
+
   // --- AUTOMATED 10-MINUTE ALERT CHECKER ENGINE ---
   useEffect(() => {
     const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes();
-    const currentSec = currentDate.getSeconds();
+    const targetFacId = selectedFacultyId || currentUser?.facultyId;
+    const targetFacName = currentFaculty?.name || currentUser?.name;
 
-    // Check all timetable entries for selected day
+    // Check timetable entries for selected day (scoped to concerned faculty if viewing specific faculty)
     timetable.forEach((entry) => {
       if (entry.day !== selectedDay) return;
+
+      if (targetFacId && targetFacId !== 'all') {
+        const matchesId = entry.facultyId === targetFacId;
+        const matchesName = targetFacName && isFacultyNameMatch(entry.facultyName, targetFacName);
+        if (!matchesId && !matchesName) return;
+      }
 
       const startMin = parseTimeToMinutes(entry.startTime);
       const diffMins = startMin - currentMin;
@@ -832,7 +846,7 @@ export default function App() {
         trigger10MinAlert(entry, diffMins);
       }
     });
-  }, [currentDate, selectedDay, timetable]);
+  }, [currentDate, selectedDay, timetable, selectedFacultyId, currentUser, currentFaculty]);
 
   // Function to fire 10-min alert
   const trigger10MinAlert = (entry: TimetableEntry, minsRemaining: number) => {
@@ -902,16 +916,27 @@ export default function App() {
   };
 
   const handleJumpToNextClass10Mins = () => {
-    // Find next upcoming class for selected faculty on selected day
+    // Find next upcoming class for selected faculty (or logged-in faculty) on selected day
     const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes();
+    const targetFacId = selectedFacultyId || currentUser?.facultyId;
+    const targetFacName = currentFaculty?.name || currentUser?.name;
+
     const upcoming = timetable
-      .filter((e) => e.facultyId === selectedFacultyId && e.day === selectedDay)
+      .filter((e) => {
+        if (e.day !== selectedDay) return false;
+        if (targetFacId && targetFacId !== 'all') {
+          const matchesId = e.facultyId === targetFacId;
+          const matchesName = targetFacName && isFacultyNameMatch(e.facultyName, targetFacName);
+          return matchesId || matchesName;
+        }
+        return true;
+      })
       .map((e) => ({ ...e, startMin: parseTimeToMinutes(e.startTime) }))
       .filter((e) => e.startMin > currentMin)
       .sort((a, b) => a.startMin - b.startMin)[0];
 
     if (!upcoming) {
-      alert(`No upcoming class found for ${selectedDay}. Try selecting a different day or faculty member!`);
+      alert(`No upcoming class found for ${targetFacName || 'faculty'} on ${selectedDay}. Try selecting a different day or faculty member!`);
       return;
     }
 
@@ -1438,7 +1463,6 @@ export default function App() {
     }
   };
 
-  const currentFaculty = facultyList.find((f) => f.id === selectedFacultyId) || facultyList[0];
   const unreadAlertsCount = notifications.filter((n) => !n.read).length;
 
   // Render Public Student Self-Enrollment Page if link or QR scanned (No Login Required)

@@ -31,6 +31,7 @@ import {
   Trash2,
   Save,
   Plus,
+  Eye,
 } from 'lucide-react';
 
 interface FacultyScheduleProps {
@@ -351,33 +352,49 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     return list;
   }, [facultyList, timetable, currentUser]);
 
-  // Determine current active faculty object
-  const currentFaculty: Faculty =
-    (currentUser &&
-      allAvailableFacultyList.find(
+  // Determine current active faculty object (resolves selected faculty accurately, defaulting to currentUser)
+  const currentFaculty: Faculty = useMemo(() => {
+    if (selectedFacultyId && selectedFacultyId !== 'all') {
+      const match =
+        allAvailableFacultyList.find((f) => f.id === selectedFacultyId) ||
+        allAvailableFacultyList.find((f) => isFacultyNameMatch(f.name, selectedFacultyId));
+      if (match) return match;
+    }
+    if (currentUser) {
+      const userMatch = allAvailableFacultyList.find(
         (f) =>
           (currentUser.facultyId && f.id === currentUser.facultyId) ||
           (f.email && currentUser.email && f.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
           isFacultyNameMatch(f.name, currentUser.name)
-      )) ||
-    allAvailableFacultyList.find((f) => f.id === selectedFacultyId) ||
-    allAvailableFacultyList.find((f) => isFacultyNameMatch(f.name, selectedFacultyId)) ||
-    (currentUser
-      ? {
-          id: currentUser.facultyId || currentUser.id || 'fac_user',
-          name: currentUser.name || 'Faculty Member',
-          email: currentUser.email || '',
-          department: currentUser.department || 'Commerce',
-          designation: 'Faculty Member',
-          phone: currentUser.phone || currentUser.whatsappPhone || '',
-          whatsappPhone: currentUser.phone || currentUser.whatsappPhone || '',
-          isVerified: true,
-        }
-      : allAvailableFacultyList[0]);
+      );
+      if (userMatch) return userMatch;
+      return {
+        id: currentUser.facultyId || currentUser.id || 'fac_user',
+        name: currentUser.name || 'Faculty Member',
+        email: currentUser.email || '',
+        department: currentUser.department || 'Commerce',
+        designation: 'Faculty Member',
+        phone: currentUser.phone || currentUser.whatsappPhone || '',
+        whatsappPhone: currentUser.phone || currentUser.whatsappPhone || '',
+        isVerified: true,
+      };
+    }
+    return allAvailableFacultyList[0] || {
+      id: 'fac_1',
+      name: 'Faculty Member',
+      email: '',
+      department: 'Commerce',
+      designation: 'Faculty Member',
+      phone: '',
+      whatsappPhone: '',
+      isVerified: true,
+    };
+  }, [selectedFacultyId, allAvailableFacultyList, currentUser]);
 
   // Check if viewing logged-in user's own schedule or another faculty's
   const isViewingOwnSchedule = Boolean(
     currentUser &&
+      selectedFacultyId !== 'all' &&
       (selectedFacultyId === currentUser.facultyId ||
         (currentFaculty &&
           (currentFaculty.id === currentUser.facultyId ||
@@ -401,29 +418,25 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
   const allFacultyEntries = useMemo(() => {
     if (!timetable || timetable.length === 0) return [];
 
-    // Allow viewing all routines across institution
+    // Allow viewing all routines across institution if 'all' is explicitly selected
     if (selectedFacultyId === 'all') {
       return timetable;
     }
 
-    // Target faculty matching
-    const targetFac =
-      allAvailableFacultyList.find((f) => f.id === selectedFacultyId) ||
-      allAvailableFacultyList.find((f) => isFacultyNameMatch(f.name, selectedFacultyId)) ||
-      currentFaculty;
-
-    if (!targetFac && !selectedFacultyId) {
+    // Target faculty strictly
+    const targetFac = currentFaculty;
+    if (!targetFac) {
       return timetable;
     }
 
     return timetable.filter((e) => {
       if (selectedFacultyId && e.facultyId === selectedFacultyId) return true;
-      if (targetFac && targetFac.id && e.facultyId === targetFac.id) return true;
-      if (targetFac && targetFac.name && isFacultyNameMatch(e.facultyName, targetFac.name)) return true;
-      if (targetFac && targetFac.email && e.facultyName && e.facultyName.toLowerCase().includes(targetFac.email.split('@')[0].toLowerCase())) return true;
+      if (targetFac.id && e.facultyId === targetFac.id) return true;
+      if (targetFac.name && isFacultyNameMatch(e.facultyName, targetFac.name)) return true;
+      if (targetFac.email && e.facultyName && e.facultyName.toLowerCase().includes(targetFac.email.split('@')[0].toLowerCase())) return true;
       return false;
     });
-  }, [timetable, selectedFacultyId, allAvailableFacultyList, currentFaculty]);
+  }, [timetable, selectedFacultyId, currentFaculty]);
 
   // Filter single day entries with normalized day comparison
   const targetDayNorm = normalizeDay(selectedDay);
@@ -441,7 +454,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
     })
     .sort((a, b) => parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime));
 
-  // --- HIGHLIGHT CURRENT / NEXT CLASS ENGINE (ONLY ACTIVE ON ACTUAL TODAY) ---
+  // --- HIGHLIGHT CURRENT / NEXT CLASS ENGINE (ONLY ACTIVE ON ACTUAL TODAY & SCOPED TO CONCERNED FACULTY) ---
   const isActualToday = !jumpDate && normalizeDay(selectedDay) === normalizeDay(getCurrentDayName(currentDate));
   const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes();
   const todayEntriesSorted = isActualToday
@@ -464,6 +477,16 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
 
   const highlightClass = isActualToday ? (ongoingClass || nextClass || todayEntriesSorted[0] || null) : null;
   const isOngoing = Boolean(ongoingClass);
+
+  // Time remaining calculation for the concerned faculty only
+  const minutesUntilNext = nextClass ? parseTimeToMinutes(nextClass.startTime) - currentMin : null;
+  const timeRemainingForNextStr = minutesUntilNext !== null
+    ? minutesUntilNext < 60
+      ? `${minutesUntilNext} min${minutesUntilNext === 1 ? '' : 's'}`
+      : `${Math.floor(minutesUntilNext / 60)} hr ${minutesUntilNext % 60} mins`
+    : null;
+
+  const minutesRemainingInOngoing = ongoingClass ? parseTimeToMinutes(ongoingClass.endTime) - currentMin : null;
 
   // --- FREE PERIOD GAPS COMPUTATION ---
   const timelineItems: TimelineItem[] = [];
@@ -616,22 +639,41 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
               </div>
             )}
             <div className="flex-1">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Logged-in Faculty Profile
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  {isViewingOwnSchedule ? 'My Active Faculty Routine' : 'Viewing Faculty Schedule'}
+                </label>
+                {currentUser && !isViewingOwnSchedule && selectedFacultyId !== 'all' && (
+                  <button
+                    onClick={() => onSelectFaculty(currentUser.facultyId || currentUser.id || '')}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 font-bold underline cursor-pointer"
+                  >
+                    Back to My Routine
+                  </button>
+                )}
+              </div>
               <select
                 value={selectedFacultyId}
                 onChange={(e) => onSelectFaculty(e.target.value)}
                 className="w-full bg-slate-900 text-white font-semibold text-sm sm:text-base rounded-xl px-3 py-1.5 border border-slate-700 focus:outline-none focus:border-blue-500 cursor-pointer"
               >
+                {currentUser && (
+                  <option value={currentUser.facultyId || currentUser.id} className="bg-slate-900 text-blue-400 font-bold">
+                    👤 My Routine — {currentUser.name} ({currentUser.department || 'Commerce'})
+                  </option>
+                )}
+                <optgroup label="Other Faculty Members (Digboi College)">
+                  {allAvailableFacultyList
+                    .filter((fac) => fac.id !== (currentUser?.facultyId || currentUser?.id) && !isFacultyNameMatch(fac.name, currentUser?.name || ''))
+                    .map((fac) => (
+                      <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
+                        {fac.name} ({fac.department || 'General'})
+                      </option>
+                    ))}
+                </optgroup>
                 <option value="all" className="bg-slate-900 text-amber-400 font-bold">
                   📋 All Faculty Master Routine ({timetable.length} classes)
                 </option>
-                {allAvailableFacultyList.map((fac) => (
-                  <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
-                    {fac.name} ({fac.department || 'General'})
-                  </option>
-                ))}
               </select>
             </div>
           </div>
@@ -767,6 +809,27 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
       {/* VIEW MODE 1: DAILY VIEW */}
       {viewMode === 'daily' && (
         <div className="space-y-5">
+          {/* Active View Context Indicator */}
+          {!isViewingOwnSchedule && selectedFacultyId !== 'all' && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3.5 px-4 text-amber-200 flex items-center justify-between shadow-sm">
+              <div className="flex items-center space-x-2.5">
+                <Eye className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-xs font-semibold">
+                  Viewing Allotted Routine for: <strong className="text-white">{currentFaculty.name}</strong> ({currentFaculty.department || 'Commerce'} Department)
+                </span>
+              </div>
+              {currentUser && (
+                <button
+                  onClick={() => onSelectFaculty(currentUser.facultyId || currentUser.id || '')}
+                  className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer flex items-center space-x-1 shrink-0"
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Back to My Routine</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Calendar Jump Date Banner */}
           {jumpDate ? (
             <div className="bg-gradient-to-r from-blue-900/90 via-indigo-900/90 to-slate-900 border-2 border-blue-400/50 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xl">
@@ -825,7 +888,7 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
             >
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="space-y-1.5">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {isOngoing ? (
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center space-x-1.5">
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
@@ -837,6 +900,25 @@ export const FacultySchedule: React.FC<FacultyScheduleProps> = ({
                         <span>NEXT UPCOMING CLASS</span>
                       </span>
                     )}
+
+                    {/* Dynamic Countdown: Time remaining for this concerned faculty member */}
+                    {!isOngoing && timeRemainingForNextStr && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 flex items-center space-x-1 font-mono shadow-sm">
+                        <Clock className="w-3 h-3 text-cyan-400 animate-pulse" />
+                        <span>Starts in: {timeRemainingForNextStr}</span>
+                      </span>
+                    )}
+
+                    {isOngoing && minutesRemainingInOngoing !== null && (
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center space-x-1 font-mono">
+                        <Clock className="w-3 h-3 text-emerald-400" />
+                        <span>{minutesRemainingInOngoing}m remaining in lecture</span>
+                      </span>
+                    )}
+
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-900/90 text-slate-300 border border-slate-700">
+                      Faculty: {highlightClass.facultyName || currentFaculty?.name}
+                    </span>
 
                     {(highlightClass.isSubstitute ||
                       highlightClass.notes?.toLowerCase().includes('substitute')) && (

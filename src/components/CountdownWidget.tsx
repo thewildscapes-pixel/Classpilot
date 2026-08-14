@@ -24,7 +24,8 @@ export const CountdownWidget: React.FC<CountdownWidgetProps> = ({
     entries,
     facultyId,
     currentDate,
-    selectedDay
+    selectedDay,
+    facultyName
   );
 
   const [secondsLeft, setSecondsLeft] = useState<number>(0);

@@ -160,11 +160,17 @@ export function getNextClassForFaculty(
   entries: TimetableEntry[],
   facultyId: string,
   currentDate: Date,
-  selectedDay: DayOfWeek
+  selectedDay: DayOfWeek,
+  facultyName?: string
 ): { nextEntry: TimetableEntry | null; ongoingEntry: TimetableEntry | null } {
-  const dayEntries = entries.filter(
-    (e) => e.facultyId === facultyId && e.day === selectedDay
-  );
+  const dayEntries = entries.filter((e) => {
+    if (e.day !== selectedDay) return false;
+    if (!facultyId || facultyId === 'all') return true;
+    if (e.facultyId === facultyId) return true;
+    if (facultyName && isFacultyNameMatch(e.facultyName, facultyName)) return true;
+    if (isFacultyNameMatch(e.facultyName, facultyId)) return true;
+    return false;
+  });
 
   const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes();
 

@@ -295,22 +295,39 @@ export const GoogleCalendarView: React.FC<GoogleCalendarViewProps> = ({
 
           {/* Today's Timetable Snippet */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-3">
-            <h3 className="font-heading font-extrabold text-sm text-white">
-              Today's Scheduled Lectures
+            <h3 className="font-heading font-extrabold text-sm text-white flex items-center justify-between">
+              <span>My Scheduled Lectures</span>
+              <span className="text-[10px] text-blue-400 font-semibold">{currentUser.name}</span>
             </h3>
             <div className="space-y-2">
-              {timetable.slice(0, 3).map((t) => (
-                <div key={t.id} className="p-3 bg-slate-800/70 rounded-xl border border-slate-700/80 text-xs space-y-1">
-                  <div className="font-bold text-white flex items-center justify-between">
-                    <span>{t.subjectCode}: {t.subjectName}</span>
-                    <span className="text-[10px] text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full">{t.startTime}</span>
+              {timetable
+                .filter((t) => {
+                  if (currentUser.facultyId && t.facultyId === currentUser.facultyId) return true;
+                  if (currentUser.name && t.facultyName && t.facultyName.toLowerCase().includes(currentUser.name.toLowerCase())) return true;
+                  return false;
+                })
+                .slice(0, 4)
+                .map((t) => (
+                  <div key={t.id} className="p-3 bg-slate-800/70 rounded-xl border border-slate-700/80 text-xs space-y-1">
+                    <div className="font-bold text-white flex items-center justify-between">
+                      <span>{t.subjectCode}: {t.subjectName}</span>
+                      <span className="text-[10px] text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full">{t.startTime}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 flex items-center justify-between">
+                      <span>📍 Room {t.room}</span>
+                      <span>{t.batch}</span>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-slate-400 flex items-center justify-between">
-                    <span>📍 Room {t.room}</span>
-                    <span>{t.batch}</span>
-                  </div>
+                ))}
+              {timetable.filter((t) => {
+                if (currentUser.facultyId && t.facultyId === currentUser.facultyId) return true;
+                if (currentUser.name && t.facultyName && t.facultyName.toLowerCase().includes(currentUser.name.toLowerCase())) return true;
+                return false;
+              }).length === 0 && (
+                <div className="p-3 text-center text-xs text-slate-500">
+                  No lectures found for your profile today.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
