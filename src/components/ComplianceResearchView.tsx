@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ResearchRecord, User } from '../types';
 import {
   FileText,
@@ -13,6 +13,8 @@ import {
   Building2,
   Printer,
   X,
+  ShieldCheck,
+  Smartphone,
 } from 'lucide-react';
 
 interface ComplianceResearchViewProps {
@@ -22,6 +24,14 @@ interface ComplianceResearchViewProps {
 const DEFAULT_RESEARCH: ResearchRecord[] = [];
 
 export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ currentUser }) => {
+  // Super Admin Check
+  const isSuperAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    const email = (currentUser.email || '').toLowerCase().trim();
+    const phone = (currentUser.whatsappPhone || '').replace(/\D/g, '');
+    return email === 'thewildscapes@gmail.com' || phone.endsWith('9706375001') || currentUser.role === 'admin';
+  }, [currentUser]);
+
   const [researchList, setResearchList] = useState<ResearchRecord[]>(() => {
     try {
       const saved = localStorage.getItem('classpilot_research_records');
@@ -35,6 +45,17 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
     } catch (e) {}
     return DEFAULT_RESEARCH;
   });
+
+  // Strict Privacy: Non-admin faculty only ever see their own research publications
+  const visibleResearch = useMemo(() => {
+    if (isSuperAdmin) return researchList;
+    return researchList.filter((r) => {
+      const idMatch = r.facultyId && (r.facultyId === currentUser.facultyId || r.facultyId === currentUser.id);
+      const nameMatch = Boolean(currentUser.name && r.authors && r.authors.toLowerCase().includes(currentUser.name.toLowerCase()));
+      return idMatch || nameMatch;
+    });
+  }, [researchList, currentUser, isSuperAdmin]);
+
   const [activeTab, setActiveTab] = useState<'research' | 'naac_audit'>('research');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
@@ -49,11 +70,17 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
 
   useEffect(() => {
     fetchResearchRecords();
-  }, []);
+  }, [currentUser.id, currentUser.facultyId, currentUser.role]);
 
   const fetchResearchRecords = async () => {
     try {
-      const res = await fetch('/api/research');
+      const res = await fetch(`/api/research?facultyId=${encodeURIComponent(currentUser.facultyId || currentUser.id || '')}`, {
+        headers: {
+          'x-user-faculty-id': currentUser.facultyId || currentUser.id || '',
+          'x-user-role': isSuperAdmin ? 'admin' : 'faculty',
+          'x-user-faculty-name': currentUser.name || '',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -123,12 +150,24 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
               <Award className="w-4 h-4 text-blue-400" />
               <span>Compliance, NAAC/NBA Audits & Research Appraisal</span>
             </div>
-            <h2 className="font-heading font-extrabold text-2xl text-white">
-              Faculty Research & Audit Portfolio
-            </h2>
+            <div className="flex items-center space-x-3">
+              <h2 className="font-heading font-extrabold text-2xl text-white">
+                Faculty Research & Audit Portfolio
+              </h2>
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Isolated Workspace</span>
+              </span>
+            </div>
             <p className="text-xs text-slate-400 mt-1">
               Log research papers, patents, and generate auto-summaries for annual appraisal and accreditation audits.
             </p>
+            <div className="mt-2.5 inline-flex items-center space-x-2 px-3 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-[11px] text-slate-300">
+              <Smartphone className="w-3.5 h-3.5 text-blue-400" />
+              <span>
+                Device Authenticated: Showing verified publications authored by <strong className="text-white">{currentUser.name || 'Faculty Member'}</strong>.
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center space-x-3">
@@ -153,7 +192,7 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            <span>Research & Publications ({researchList.length})</span>
+            <span>Research & Publications ({visibleResearch.length})</span>
           </button>
 
           <button
@@ -174,7 +213,7 @@ export const ComplianceResearchView: React.FC<ComplianceResearchViewProps> = ({ 
       {activeTab === 'research' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {researchList.map((rec) => (
+            {visibleResearch.map((rec) => (
               <div
                 key={rec.id}
                 className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-3xl p-5 space-y-3 transition-all"

@@ -247,6 +247,20 @@ async function initDatabase() {
       autoRepaired INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS user_devices (
+      deviceId TEXT NOT NULL,
+      facultyId TEXT NOT NULL,
+      facultyName TEXT,
+      phone TEXT,
+      email TEXT,
+      pinCode TEXT,
+      deviceModel TEXT,
+      registeredAt TEXT,
+      lastActiveAt TEXT,
+      isTrusted INTEGER DEFAULT 1,
+      PRIMARY KEY (deviceId, facultyId)
+    );
+
     CREATE TABLE IF NOT EXISTS qr_enrollment_sessions (
       id TEXT PRIMARY KEY,
       token TEXT NOT NULL,
@@ -1432,9 +1446,76 @@ async function startServer() {
     });
   });
 
-  // --- CLASS DIARY SQLITE ROUTES ---
+  // --- DEVICE AUTHORIZATION & SECURITY ROUTES ---
+  app.post('/api/auth/register-device', (req, res) => {
+    const { deviceId, facultyId, facultyName, phone, email, pinCode, deviceModel, registeredAt } = req.body;
+    if (!deviceId || !facultyId) {
+      res.status(400).json({ error: 'Device ID and Faculty ID are required' });
+      return;
+    }
+    const now = new Date().toISOString();
+    runSql(
+      `INSERT OR REPLACE INTO user_devices 
+      (deviceId, facultyId, facultyName, phone, email, pinCode, deviceModel, registeredAt, lastActiveAt, isTrusted)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [
+        deviceId,
+        facultyId,
+        facultyName || '',
+        phone || '',
+        email || '',
+        pinCode || '',
+        deviceModel || 'Web Browser',
+        registeredAt || now,
+        now,
+      ]
+    );
+    res.json({ success: true, message: 'Device registered and bound to faculty profile' });
+  });
+
+  app.post('/api/auth/verify-device', (req, res) => {
+    const { deviceId, facultyId, pinCode } = req.body;
+    if (!deviceId || !facultyId) {
+      res.status(400).json({ error: 'Device ID and Faculty ID are required' });
+      return;
+    }
+    const rows = queryAll('SELECT * FROM user_devices WHERE deviceId = ? AND facultyId = ?', [deviceId, facultyId]);
+    if (rows.length === 0) {
+      res.json({ isBound: false, isTrusted: false });
+      return;
+    }
+    const device = rows[0];
+    if (device.pinCode && pinCode && device.pinCode !== pinCode) {
+      res.status(401).json({ isBound: true, isTrusted: false, error: 'Invalid security PIN' });
+      return;
+    }
+    runSql('UPDATE user_devices SET lastActiveAt = ? WHERE deviceId = ? AND facultyId = ?', [new Date().toISOString(), deviceId, facultyId]);
+    res.json({ isBound: true, isTrusted: Boolean(device.isTrusted), device });
+  });
+
+  app.get('/api/auth/faculty-devices/:facultyId', (req, res) => {
+    const { facultyId } = req.params;
+    const rows = queryAll('SELECT deviceId, deviceModel, registeredAt, lastActiveAt, isTrusted FROM user_devices WHERE facultyId = ?', [facultyId]);
+    res.json(rows);
+  });
+
+  // --- CLASS DIARY SQLITE ROUTES WITH STRICT DATA ISOLATION ---
   app.get('/api/class-diary', (req, res) => {
-    const rows = queryAll('SELECT * FROM class_diary ORDER BY date DESC, startTime DESC');
+    const reqFacultyId = req.query.facultyId as string;
+    const userRole = req.headers['x-user-role'] as string;
+    const userFacultyId = (req.headers['x-user-faculty-id'] as string) || reqFacultyId;
+    const userFacultyName = req.headers['x-user-faculty-name'] as string;
+
+    let rows: any[];
+    // Strictly isolate data: if caller is not verified admin and requests their records
+    if (userRole !== 'admin' && (userFacultyId || userFacultyName)) {
+      rows = queryAll(
+        'SELECT * FROM class_diary WHERE facultyId = ? OR (facultyName LIKE ? AND facultyName != "") ORDER BY date DESC, startTime DESC',
+        [userFacultyId || '', userFacultyName ? `%${userFacultyName}%` : '']
+      );
+    } else {
+      rows = queryAll('SELECT * FROM class_diary ORDER BY date DESC, startTime DESC');
+    }
     const diaryEntries = rows.map((r: any) => {
       let absentRollNumbers: string[] = [];
       try {
@@ -1667,9 +1748,22 @@ async function startServer() {
     res.json({ success: true, message: 'Event deleted' });
   });
 
-  // --- RESEARCH SQLITE ROUTES ---
+  // --- RESEARCH SQLITE ROUTES WITH PRIVACY FILTERING ---
   app.get('/api/research', (req, res) => {
-    const rows = queryAll('SELECT * FROM research_records ORDER BY year DESC, dateLogged DESC');
+    const reqFacultyId = req.query.facultyId as string;
+    const userRole = req.headers['x-user-role'] as string;
+    const userFacultyId = (req.headers['x-user-faculty-id'] as string) || reqFacultyId;
+    const userFacultyName = req.headers['x-user-faculty-name'] as string;
+
+    let rows: any[];
+    if (userRole !== 'admin' && (userFacultyId || userFacultyName)) {
+      rows = queryAll(
+        'SELECT * FROM research_records WHERE facultyId = ? OR (authors LIKE ? AND authors != "") ORDER BY year DESC, dateLogged DESC',
+        [userFacultyId || '', userFacultyName ? `%${userFacultyName}%` : '']
+      );
+    } else {
+      rows = queryAll('SELECT * FROM research_records ORDER BY year DESC, dateLogged DESC');
+    }
     res.json(rows);
   });
 

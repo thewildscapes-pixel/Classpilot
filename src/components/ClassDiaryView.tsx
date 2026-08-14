@@ -50,7 +50,11 @@ import {
   TrendingUp,
   Layers,
   Award,
+  ShieldCheck,
+  Smartphone,
+  UserX,
 } from 'lucide-react';
+import { isFacultyNameMatch } from '../utils/timeUtils';
 
 interface ClassDiaryViewProps {
   currentUser: User;
@@ -83,6 +87,26 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   faculties = [],
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'records' | 'attendance' | 'syllabus'>('records');
+
+  // Super Admin Check (Principal / System Admin)
+  const isSuperAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    const email = (currentUser.email || '').toLowerCase().trim();
+    const phone = (currentUser.whatsappPhone || '').replace(/\D/g, '');
+    return email === 'thewildscapes@gmail.com' || phone.endsWith('9706375001') || currentUser.role === 'admin';
+  }, [currentUser]);
+
+  // Admin Scope: 'my_only' (own classes) vs 'all_faculty' (institutional master inspection)
+  const [adminScope, setAdminScope] = useState<'my_only' | 'all_faculty'>('my_only');
+
+  // Strict ownership verification: A faculty member can only ever see their own logged records
+  const isOwnDiaryEntry = (e: ClassDiaryEntry): boolean => {
+    if (isSuperAdmin && adminScope === 'all_faculty') return true;
+    const directIdMatch = Boolean(e.facultyId && (e.facultyId === currentUser.facultyId || e.facultyId === currentUser.id));
+    const nameMatch = Boolean(e.facultyName && currentUser.name && isFacultyNameMatch(e.facultyName, currentUser.name));
+    return directIdMatch || nameMatch;
+  };
+
   const [diaryEntries, setDiaryEntries] = useState<ClassDiaryEntry[]>(() => {
     try {
       const saved = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
@@ -196,9 +220,12 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     }
   };
 
-  // Filtered Diary Entries based on faculty, selected subject, date timeframe, and search term
+  // Filtered Diary Entries based on faculty ownership, selected subject, date timeframe, and search term
   const filteredDiaryEntries = useMemo(() => {
     return diaryEntries.filter((e) => {
+      // 0. Strict Data Isolation Check: Must be logged by current faculty (or Super Admin inspection mode)
+      if (!isOwnDiaryEntry(e)) return false;
+
       // 1. Subject filter
       const matchSubject =
         filterSubject === 'All' ||
@@ -222,7 +249,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
       return matchSubject && matchDate && matchSearch;
     });
-  }, [diaryEntries, filterSubject, startDate, endDate, searchTerm]);
+  }, [diaryEntries, filterSubject, startDate, endDate, searchTerm, adminScope, isSuperAdmin, currentUser]);
 
   // Helper function to safely merge incoming diary entries into state and localStorage
   const mergeEntries = (existing: ClassDiaryEntry[], incoming: ClassDiaryEntry[]): ClassDiaryEntry[] => {
@@ -357,7 +384,13 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
   const fetchDiaryEntries = async () => {
     try {
-      const res = await fetch('/api/class-diary');
+      const res = await fetch(`/api/class-diary?facultyId=${encodeURIComponent(currentUser.facultyId || currentUser.id || '')}`, {
+        headers: {
+          'x-user-faculty-id': currentUser.facultyId || currentUser.id || '',
+          'x-user-role': isSuperAdmin ? 'admin' : 'faculty',
+          'x-user-faculty-name': currentUser.name || '',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
@@ -610,10 +643,10 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     }
   };
 
-  // Export CSV
+  // Export CSV (Filtered / Faculty-Scoped Records Only)
   const handleExportCSV = () => {
     const headers = 'ID,Date,Start Time,End Time,Subject Code,Subject Name,Batch,Room,Topic Taught,Syllabus Unit,Duration Mins,Faculty,Remarks\n';
-    const rows = diaryEntries
+    const rows = filteredDiaryEntries
       .map(
         (e) =>
           `"${e.id}","${e.date}","${e.startTime}","${e.endTime}","${e.subjectCode}","${e.subjectName}","${e.batch}","${e.room}","${e.topicTaught.replace(
@@ -1267,18 +1300,58 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
               <BookOpen className="w-4 h-4" />
               <span>Academic Class Diary & Record Log</span>
             </div>
-            <h2 className="font-heading font-extrabold text-2xl text-white">
-              Class Record Logbook
-            </h2>
+            <div className="flex items-center space-x-3">
+              <h2 className="font-heading font-extrabold text-2xl text-white">
+                Class Record Logbook
+              </h2>
+              <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Device-Bound Privacy Active</span>
+              </span>
+            </div>
             <p className="text-xs text-slate-400 mt-1 max-w-2xl">
               Log topics taught, duration, student attendance, and syllabus progress.
               <span className="text-amber-400 font-semibold ml-1">
                 🔒 24-Hour Lock Rule: Entries become permanently read-only after 24 hours.
               </span>
             </p>
+
+            {/* Faculty Isolation Notice */}
+            <div className="mt-2.5 inline-flex items-center space-x-2 px-3 py-1 rounded-xl bg-slate-800/80 border border-slate-700/60 text-[11px] text-slate-300">
+              <Smartphone className="w-3.5 h-3.5 text-blue-400" />
+              <span>
+                Personal Workspace: Authenticated as <strong className="text-white">{currentUser.name || 'Faculty Member'}</strong>. Records belonging to other colleagues are completely hidden and isolated on this device.
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Super Admin / Principal Institutional View Toggle */}
+            {isSuperAdmin && (
+              <div className="flex items-center bg-slate-800/90 border border-indigo-500/40 rounded-xl p-0.5">
+                <button
+                  onClick={() => setAdminScope('my_only')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    adminScope === 'my_only'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  My Classes
+                </button>
+                <button
+                  onClick={() => setAdminScope('all_faculty')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    adminScope === 'all_faculty'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-indigo-300 hover:text-white'
+                  }`}
+                >
+                  All Faculty (Audit)
+                </button>
+              </div>
+            )}
+
             {offlineDrafts.length > 0 && (
               <button
                 onClick={handleSyncDrafts}
