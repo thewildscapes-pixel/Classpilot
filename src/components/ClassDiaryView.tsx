@@ -16,6 +16,8 @@ import { INITIAL_CLASS_DIARY } from '../data/initialData';
 import {
   subscribeToClassDiaryRealtime,
   saveClassDiaryToFirestore,
+  getClassDiaryFromFirestore,
+  deleteClassDiaryFromFirestore,
 } from '../lib/firebaseService';
 import {
   generateFacultyClassDiaryPDF,
@@ -62,7 +64,7 @@ import {
   CalendarDays,
   CheckSquare,
 } from 'lucide-react';
-import { isFacultyNameMatch } from '../utils/timeUtils';
+import { isFacultyNameMatch, isPhoneMatch } from '../utils/timeUtils';
 
 interface ClassDiaryViewProps {
   currentUser: User;
@@ -149,6 +151,18 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const isOwnDiaryEntry = (e: ClassDiaryEntry): boolean => {
     if (isSuperAdmin && adminScope === 'all_faculty') return true;
 
+    // Check direct email match
+    const myEmail = (currentUser.email || '').toLowerCase().trim();
+    if (myEmail && e.facultyEmail && e.facultyEmail.toLowerCase().trim() === myEmail) {
+      return true;
+    }
+
+    // Check direct phone / WhatsApp match
+    const myPhone = currentUser.whatsappPhone || (currentUser as any).phone || '';
+    if (myPhone && e.facultyPhone && isPhoneMatch(e.facultyPhone, myPhone)) {
+      return true;
+    }
+
     // Check direct ID match
     const myIds = [
       currentUser.facultyId,
@@ -183,7 +197,8 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     const isDeborsheeEntry = Boolean(
       (e.facultyName && e.facultyName.toLowerCase().includes('deborshee')) ||
       e.facultyId === 'fac_1' ||
-      e.facultyId === 'fac_deborshee_gogoi'
+      e.facultyId === 'fac_deborshee_gogoi' ||
+      (e.facultyEmail && e.facultyEmail.toLowerCase().includes('thewildscapes'))
     );
 
     if (isDeborsheeUser && isDeborsheeEntry) return true;
@@ -705,6 +720,18 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   }, [currentUser.id, currentUser.facultyId, currentUser.role]);
 
   const fetchDiaryEntries = async () => {
+    // 1. Fetch from Firestore (primary multi-device real-time store)
+    try {
+      const fsDiary = await getClassDiaryFromFirestore();
+      if (Array.isArray(fsDiary) && fsDiary.length > 0) {
+        const nonExcluded = fsDiary.filter((e) => !isExcludedSubject(e.subjectName, e.subjectCode));
+        setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
+      }
+    } catch (fsErr) {
+      console.warn('Class diary Firestore initial fetch error:', fsErr);
+    }
+
+    // 2. Fetch from Express SQLite backend
     try {
       const res = await fetch(`/api/class-diary?facultyId=${encodeURIComponent(currentUser.facultyId || currentUser.id || '')}`, {
         headers: {
@@ -718,16 +745,14 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
         if (Array.isArray(data) && data.length > 0) {
           const nonExcluded = data.filter((e: any) => !isExcludedSubject(e.subjectName, e.subjectCode));
           setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
-        } else {
-          loadLocalDiaryEntries();
         }
-      } else {
-        // Fallback to local dataset
-        loadLocalDiaryEntries();
       }
     } catch (e) {
-      loadLocalDiaryEntries();
+      console.warn('Class diary backend API fetch error:', e);
     }
+
+    // 3. Fallback to local cache
+    loadLocalDiaryEntries();
   };
 
   const loadLocalDiaryEntries = () => {
@@ -941,10 +966,15 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       ? formTopic.trim() || `[Cancelled - ${formCancellationCategory}]${formCancellationReason.trim() ? ': ' + formCancellationReason.trim() : ''}`
       : formTopic.trim();
 
+    const facultyIdVal = currentUser.facultyId || (currentUser.email?.toLowerCase().includes('thewildscapes') ? 'fac_1' : (currentUser.id || 'fac_1'));
+    const facultyNameVal = currentUser.name || (currentUser.email?.toLowerCase().includes('thewildscapes') ? 'Dr. Deborshee Gogoi' : 'Faculty Member');
+
     const newEntry: ClassDiaryEntry = {
       id: editingEntryId || `diary_${Date.now()}`,
-      facultyId: currentUser.facultyId || 'fac_1',
-      facultyName: currentUser.name || 'Faculty Member',
+      facultyId: facultyIdVal,
+      facultyName: facultyNameVal,
+      facultyEmail: currentUser.email || '',
+      facultyPhone: currentUser.whatsappPhone || (currentUser as any).phone || '',
       department: currentUser.department || 'Commerce',
       date: formDate,
       startTime: formStartTime,
@@ -1030,8 +1060,10 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       // Still allow creating a generic non-teaching holiday record for the day
       const generalEntry: ClassDiaryEntry = {
         id: `diary_bulk_${Date.now()}`,
-        facultyId: currentUser.facultyId || 'fac_1',
-        facultyName: currentUser.name || 'Faculty Member',
+        facultyId: currentUser.facultyId || (currentUser.email?.toLowerCase().includes('thewildscapes') ? 'fac_1' : (currentUser.id || 'fac_1')),
+        facultyName: currentUser.name || (currentUser.email?.toLowerCase().includes('thewildscapes') ? 'Dr. Deborshee Gogoi' : 'Faculty Member'),
+        facultyEmail: currentUser.email || '',
+        facultyPhone: currentUser.whatsappPhone || (currentUser as any).phone || '',
         department: currentUser.department || 'Commerce',
         date: bulkCancelDate,
         startTime: '09:00',
@@ -1075,8 +1107,10 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       const startMs = new Date(`${bulkCancelDate}T${slot.startTime}`).getTime();
       const newEntry: ClassDiaryEntry = {
         id: `diary_bulk_${slot.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        facultyId: slot.facultyId || currentUser.facultyId || 'fac_1',
-        facultyName: slot.facultyName || currentUser.name || 'Faculty Member',
+        facultyId: slot.facultyId || currentUser.facultyId || (currentUser.email?.toLowerCase().includes('thewildscapes') ? 'fac_1' : (currentUser.id || 'fac_1')),
+        facultyName: slot.facultyName || currentUser.name || (currentUser.email?.toLowerCase().includes('thewildscapes') ? 'Dr. Deborshee Gogoi' : 'Faculty Member'),
+        facultyEmail: currentUser.email || '',
+        facultyPhone: currentUser.whatsappPhone || (currentUser as any).phone || '',
         department: slot.department || currentUser.department || 'Commerce',
         date: bulkCancelDate,
         startTime: slot.startTime,
@@ -1879,6 +1913,17 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                 </button>
               </div>
             )}
+
+            <button
+              onClick={() => {
+                fetchDiaryEntries();
+              }}
+              className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm"
+              title="Sync latest entries across tablet, mobile, and laptop"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+              <span>Sync Cloud</span>
+            </button>
 
             {offlineDrafts.length > 0 && (
               <button

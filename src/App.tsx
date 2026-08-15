@@ -58,6 +58,8 @@ import {
   subscribeToFacultySelfImportsRealtime,
   getFacultySelfImportsFromFirestore,
   subscribeToQREnrollmentSessionsRealtime,
+  subscribeToClassDiaryRealtime,
+  getClassDiaryFromFirestore,
 } from './lib/firebaseService';
 
 // Components
@@ -666,6 +668,31 @@ export default function App() {
         }
       })
       .catch((err) => console.warn(`[CentralSync] Endpoint '/api/students' fetch exception: ${err.message || err}`));
+
+    // 5. Fetch Class Diary from Firestore & Express API for cross-device sync
+    try {
+      const fsDiary = await getClassDiaryFromFirestore();
+      if (Array.isArray(fsDiary) && fsDiary.length > 0) {
+        try {
+          const prevRaw = localStorage.getItem('classpilot_class_diary');
+          const prevList = prevRaw ? JSON.parse(prevRaw) : [];
+          const mergedMap = new Map<string, any>();
+          prevList.forEach((e: any) => e && e.id && mergedMap.set(e.id, e));
+          fsDiary.forEach((e: any) => e && e.id && mergedMap.set(e.id, { ...mergedMap.get(e.id), ...e }));
+          const merged = Array.from(mergedMap.values());
+          localStorage.setItem('classpilot_class_diary', JSON.stringify(merged));
+          localStorage.setItem('lecturapulse_class_diary', JSON.stringify(merged));
+        } catch (e) {}
+
+        fetch('/api/class-diary/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries: fsDiary, replaceExisting: false }),
+        }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('[CentralSync] Class Diary Firestore sync note:', err);
+    }
   }, []);
 
   // --- FETCH CENTRAL BACKEND DATA ON MOUNT & REALTIME FIRESTORE TIMETABLE ---
@@ -677,6 +704,30 @@ export default function App() {
     const pollTimer = setInterval(() => {
       syncCentralDatabase();
     }, 4000);
+
+    // Firestore Real-Time Class Diary Listener for instantaneous multi-device cross-sync
+    const unsubscribeClassDiary = subscribeToClassDiaryRealtime('all', true, (entries) => {
+      if (Array.isArray(entries) && entries.length > 0) {
+        console.log(`[FirestoreRealtime] Received ${entries.length} Class Diary entries from Cloud Firestore.`);
+        try {
+          const prevRaw = localStorage.getItem('classpilot_class_diary');
+          const prevList = prevRaw ? JSON.parse(prevRaw) : [];
+          const mergedMap = new Map<string, any>();
+          prevList.forEach((e: any) => e && e.id && mergedMap.set(e.id, e));
+          entries.forEach((e: any) => e && e.id && mergedMap.set(e.id, { ...mergedMap.get(e.id), ...e }));
+          const merged = Array.from(mergedMap.values());
+          localStorage.setItem('classpilot_class_diary', JSON.stringify(merged));
+          localStorage.setItem('lecturapulse_class_diary', JSON.stringify(merged));
+        } catch (e) {}
+
+        // Forward to local Express server
+        fetch('/api/class-diary/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entries, replaceExisting: false }),
+        }).catch(() => {});
+      }
+    });
 
     // Firestore Real-Time Timetable Listener
     const unsubscribeTimetable = subscribeToTimetableRealtime((entries) => {

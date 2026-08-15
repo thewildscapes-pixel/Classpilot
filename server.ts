@@ -1580,11 +1580,20 @@ async function startServer() {
 
     let rows: any[];
     // Strictly isolate data: if caller is not verified admin and requests their records
+    const isDeborshee = (userFacultyId && (userFacultyId === 'fac_1' || userFacultyId === 'fac_deborshee_gogoi' || userFacultyId.includes('thewildscapes'))) ||
+      (userFacultyName && userFacultyName.toLowerCase().includes('deborshee'));
+
     if (userRole !== 'admin' && (userFacultyId || userFacultyName)) {
-      rows = queryAll(
-        'SELECT * FROM class_diary WHERE facultyId = ? OR (facultyName LIKE ? AND facultyName != "") ORDER BY date DESC, startTime DESC',
-        [userFacultyId || '', userFacultyName ? `%${userFacultyName}%` : '']
-      );
+      if (isDeborshee) {
+        rows = queryAll(
+          'SELECT * FROM class_diary WHERE facultyId IN ("fac_1", "fac_deborshee_gogoi") OR facultyName LIKE "%Deborshee%" OR facultyName LIKE "%Gogoi%" ORDER BY date DESC, startTime DESC'
+        );
+      } else {
+        rows = queryAll(
+          'SELECT * FROM class_diary WHERE facultyId = ? OR (facultyName LIKE ? AND facultyName != "") ORDER BY date DESC, startTime DESC',
+          [userFacultyId || '', userFacultyName ? `%${userFacultyName}%` : '']
+        );
+      }
     } else {
       rows = queryAll('SELECT * FROM class_diary ORDER BY date DESC, startTime DESC');
     }

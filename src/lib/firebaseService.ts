@@ -1008,11 +1008,60 @@ export function subscribeToRoomsRealtime(
 }
 
 // ==========================================
-// 3. CLASS DIARY WITH OFFLINE SUPPORT & 24-HOUR LOCK
+// 3. CLASS DIARY WITH OFFLINE SUPPORT & MULTI-DEVICE SYNC
 // ==========================================
 
 /**
- * Subscribe to Class Diary entries in real time for a faculty or all entries if admin.
+ * Fetch all Class Diary entries directly from Firestore.
+ */
+export async function getClassDiaryFromFirestore(): Promise<ClassDiaryEntry[]> {
+  try {
+    const colRef = collection(db, 'classDiary');
+    const snapshot = await getDocs(colRef);
+    const list: ClassDiaryEntry[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      list.push({
+        id: docSnap.id,
+        facultyId: data.facultyId || '',
+        facultyName: data.facultyName || '',
+        facultyEmail: data.facultyEmail || '',
+        facultyPhone: data.facultyPhone || '',
+        department: data.department || '',
+        date: data.date || '',
+        startTime: data.startTime || '',
+        endTime: data.endTime || '',
+        classStartTimestamp: data.classStartTimestamp || Date.now(),
+        subjectCode: data.subjectCode || '',
+        subjectName: data.subjectName || '',
+        batch: data.batch || data.classBatch || '',
+        classBatch: data.batch || data.classBatch || '',
+        room: data.room || '',
+        topicTaught: data.topicTaught || '',
+        syllabusUnit: data.syllabusUnit || '',
+        durationMins: Number(data.durationMins) || 60,
+        remarks: data.remarks || '',
+        attendance: data.attendance || [],
+        status: data.status || (data.isCancelled ? 'Cancelled' : 'Conducted'),
+        isCancelled: Boolean(data.isCancelled || data.status === 'Cancelled'),
+        cancellationCategory: data.cancellationCategory || '',
+        cancellationReason: data.cancellationReason || '',
+        timetableEntryId: data.timetableEntryId || '',
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt || new Date().toISOString(),
+        isSynced: true,
+      });
+    });
+    list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
+    return list;
+  } catch (error) {
+    console.warn('Could not fetch class diary from Firestore:', error);
+    return [];
+  }
+}
+
+/**
+ * Subscribe to Class Diary entries in real time for multi-device sync across all logins.
  */
 export function subscribeToClassDiaryRealtime(
   facultyId: string,
@@ -1020,16 +1069,9 @@ export function subscribeToClassDiaryRealtime(
   callback: (entries: ClassDiaryEntry[]) => void
 ) {
   const colRef = collection(db, 'classDiary');
-  let q;
-
-  if (isAdmin) {
-    q = query(colRef);
-  } else {
-    q = query(colRef, where('facultyId', '==', facultyId));
-  }
 
   return onSnapshot(
-    q,
+    colRef,
     (snapshot) => {
       const list: ClassDiaryEntry[] = [];
       snapshot.forEach((docSnap) => {
@@ -1038,6 +1080,8 @@ export function subscribeToClassDiaryRealtime(
           id: docSnap.id,
           facultyId: data.facultyId || '',
           facultyName: data.facultyName || '',
+          facultyEmail: data.facultyEmail || '',
+          facultyPhone: data.facultyPhone || '',
           department: data.department || '',
           date: data.date || '',
           startTime: data.startTime || '',
@@ -1045,23 +1089,25 @@ export function subscribeToClassDiaryRealtime(
           classStartTimestamp: data.classStartTimestamp || Date.now(),
           subjectCode: data.subjectCode || '',
           subjectName: data.subjectName || '',
-          batch: data.batch || '',
+          batch: data.batch || data.classBatch || '',
+          classBatch: data.batch || data.classBatch || '',
           room: data.room || '',
           topicTaught: data.topicTaught || '',
           syllabusUnit: data.syllabusUnit || '',
-          durationMins: data.durationMins || 60,
+          durationMins: Number(data.durationMins) || 60,
           remarks: data.remarks || '',
           attendance: data.attendance || [],
           status: data.status || (data.isCancelled ? 'Cancelled' : 'Conducted'),
           isCancelled: Boolean(data.isCancelled || data.status === 'Cancelled'),
           cancellationCategory: data.cancellationCategory || '',
           cancellationReason: data.cancellationReason || '',
+          timetableEntryId: data.timetableEntryId || '',
           createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
           updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt || new Date().toISOString(),
           isSynced: true,
         });
       });
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      list.sort((a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime());
       callback(list);
     },
     (err) => {
@@ -1092,15 +1138,13 @@ export async function saveClassDiaryToFirestore(entry: ClassDiaryEntry): Promise
       }
     }
 
-    await setDoc(
-      docRef,
-      {
-        ...entry,
-        updatedAt: serverTimestamp(),
-        createdAt: existingSnap.exists() ? existingSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const payload: any = {
+      ...entry,
+      updatedAt: serverTimestamp(),
+      createdAt: existingSnap.exists() ? existingSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
+    };
+
+    await setDoc(docRef, payload, { merge: true });
 
     return { success: true, message: 'Class diary entry saved and synchronized successfully.' };
   } catch (error: any) {
@@ -1109,6 +1153,20 @@ export async function saveClassDiaryToFirestore(entry: ClassDiaryEntry): Promise
       success: true,
       message: 'Saved locally in offline cache. It will auto-sync with Firestore when back online.',
     };
+  }
+}
+
+/**
+ * Delete Class Diary entry from Firestore.
+ */
+export async function deleteClassDiaryFromFirestore(entryId: string): Promise<boolean> {
+  try {
+    const docRef = doc(db, 'classDiary', entryId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (error) {
+    console.warn('Error deleting class diary from Firestore:', error);
+    return false;
   }
 }
 

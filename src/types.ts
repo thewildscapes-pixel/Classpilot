@@ -197,6 +197,8 @@ export interface ClassDiaryEntry {
   id: string;
   facultyId: string;
   facultyName: string;
+  facultyEmail?: string;
+  facultyPhone?: string;
   department: string;
   timetableEntryId?: string;
   date: string; // YYYY-MM-DD
