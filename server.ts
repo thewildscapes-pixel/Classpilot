@@ -320,6 +320,10 @@ async function initDatabase() {
     'durationMins INTEGER',
     'remarks TEXT',
     'attendance TEXT',
+    "status TEXT DEFAULT 'Conducted'",
+    'isCancelled INTEGER DEFAULT 0',
+    'cancellationCategory TEXT',
+    'cancellationReason TEXT',
   ];
   extraDiaryCols.forEach((colDef) => {
     try {
@@ -393,6 +397,60 @@ async function initDatabase() {
     }
   } catch (err) {
     console.warn('Notice auto-restoring timetable from JSON backup:', err);
+  }
+
+  // Auto-restore class_diary from class_diary.json disk backup if empty
+  try {
+    const diaryCountRes = queryAll<{ cnt: number }>('SELECT COUNT(*) as cnt FROM class_diary');
+    if (!diaryCountRes || !diaryCountRes[0] || diaryCountRes[0].cnt === 0) {
+      const backupDiary = loadJsonFromDisk<any[]>('class_diary.json');
+      if (Array.isArray(backupDiary) && backupDiary.length > 0) {
+        console.log(`✨ Auto-restoring ${backupDiary.length} class diary entries from class_diary.json disk backup...`);
+        backupDiary.forEach((entry) => {
+          const id = entry.id || `diary_${Date.now()}`;
+          const startTimestamp = entry.classStartTimestamp || new Date(`${entry.date || '2026-08-14'}T${entry.startTime || '09:00'}`).getTime();
+          const batchVal = entry.batch || entry.classBatch || '';
+          const attendanceJson = typeof entry.attendance === 'string' ? entry.attendance : JSON.stringify(entry.attendance || []);
+          const absentJson = typeof entry.absentRollNumbers === 'string' ? entry.absentRollNumbers : JSON.stringify(entry.absentRollNumbers || []);
+
+          runSql(
+            `INSERT OR REPLACE INTO class_diary 
+            (id, facultyId, facultyName, department, timetableEntryId, subjectCode, subjectName, batch, classBatch, room, date, startTime, endTime, topicTaught, syllabusUnit, teachingMethod, learningOutcomes, durationMins, remarks, attendance, totalStudentsPresent, totalEnrolledStudents, absentRollNumbers, classStartTimestamp, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id,
+              entry.facultyId || 'fac_1',
+              entry.facultyName || 'Dr. Deborshee Gogoi',
+              entry.department || 'Commerce',
+              entry.timetableEntryId || '',
+              entry.subjectCode || '',
+              entry.subjectName || '',
+              batchVal,
+              batchVal,
+              entry.room || 'Room No. C1',
+              entry.date || '2026-08-14',
+              entry.startTime || '09:00',
+              entry.endTime || '10:00',
+              entry.topicTaught || 'Lecture & Discussion',
+              entry.syllabusUnit || 'Unit 1',
+              entry.teachingMethod || 'Lecture',
+              entry.learningOutcomes || '',
+              Number(entry.durationMins) || 60,
+              entry.remarks || '',
+              attendanceJson,
+              entry.totalStudentsPresent || 40,
+              entry.totalEnrolledStudents || 45,
+              absentJson,
+              startTimestamp,
+              entry.createdAt || new Date().toISOString(),
+              entry.updatedAt || new Date().toISOString(),
+            ]
+          );
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Notice auto-restoring class_diary from JSON backup:', err);
   }
 
   saveDbToDisk();
@@ -1574,6 +1632,10 @@ async function startServer() {
         totalStudentsPresent: Number(r.totalStudentsPresent) || 0,
         totalEnrolledStudents: Number(r.totalEnrolledStudents) || 0,
         classStartTimestamp: Number(r.classStartTimestamp) || 0,
+        status: r.status || (r.isCancelled ? 'Cancelled' : 'Conducted'),
+        isCancelled: Boolean(r.isCancelled || r.status === 'Cancelled'),
+        cancellationCategory: r.cancellationCategory || '',
+        cancellationReason: r.cancellationReason || '',
         createdAt: r.createdAt || new Date().toISOString(),
         updatedAt: r.updatedAt || new Date().toISOString(),
       };
@@ -1584,8 +1646,18 @@ async function startServer() {
 
   app.post('/api/class-diary', (req, res) => {
     const entry = req.body;
-    if (!entry.topicTaught) {
-      res.status(400).json({ error: 'Topic taught is required' });
+    const isCancelled = Boolean(entry.isCancelled || entry.status === 'Cancelled');
+    const status = entry.status || (isCancelled ? 'Cancelled' : 'Conducted');
+    const cancellationCategory = entry.cancellationCategory || (isCancelled ? 'Institutional Holiday' : '');
+    const cancellationReason = entry.cancellationReason || '';
+
+    let topicTaught = entry.topicTaught || '';
+    if (isCancelled && !topicTaught) {
+      topicTaught = `[Cancelled] ${cancellationCategory}${cancellationReason ? ': ' + cancellationReason : ''}`;
+    }
+
+    if (!isCancelled && !topicTaught) {
+      res.status(400).json({ error: 'Topic taught is required for conducted classes' });
       return;
     }
     const id = entry.id || `diary_${Date.now()}`;
@@ -1597,8 +1669,8 @@ async function startServer() {
 
     runSql(
       `INSERT OR REPLACE INTO class_diary 
-      (id, facultyId, facultyName, department, timetableEntryId, subjectCode, subjectName, batch, classBatch, room, date, startTime, endTime, topicTaught, syllabusUnit, teachingMethod, learningOutcomes, durationMins, remarks, attendance, totalStudentsPresent, totalEnrolledStudents, absentRollNumbers, classStartTimestamp, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      (id, facultyId, facultyName, department, timetableEntryId, subjectCode, subjectName, batch, classBatch, room, date, startTime, endTime, topicTaught, syllabusUnit, teachingMethod, learningOutcomes, durationMins, remarks, attendance, totalStudentsPresent, totalEnrolledStudents, absentRollNumbers, classStartTimestamp, status, isCancelled, cancellationCategory, cancellationReason, createdAt, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         entry.facultyId || '',
@@ -1613,7 +1685,7 @@ async function startServer() {
         entry.date || new Date().toISOString().split('T')[0],
         entry.startTime || '09:00',
         entry.endTime || '10:15',
-        entry.topicTaught,
+        topicTaught,
         entry.syllabusUnit || '',
         entry.teachingMethod || 'Lecture',
         entry.learningOutcomes || '',
@@ -1624,6 +1696,10 @@ async function startServer() {
         entry.totalEnrolledStudents || (entry.attendance ? entry.attendance.length : 0),
         JSON.stringify(entry.absentRollNumbers || (entry.attendance ? entry.attendance.filter((a: any) => a.status === 'Absent').map((a: any) => a.rollNo) : [])),
         startTimestamp,
+        status,
+        isCancelled ? 1 : 0,
+        cancellationCategory,
+        cancellationReason,
         createdAt,
         updatedAt,
       ]
@@ -1632,6 +1708,11 @@ async function startServer() {
     res.status(201).json({
       ...entry,
       id,
+      topicTaught,
+      status,
+      isCancelled,
+      cancellationCategory,
+      cancellationReason,
       batch: batchVal,
       classBatch: batchVal,
       classStartTimestamp: startTimestamp,
@@ -1665,9 +1746,14 @@ async function startServer() {
     const batchVal = body.batch || body.classBatch || existingEntry.batch || existingEntry.classBatch || '';
     const attendanceJson = typeof body.attendance === 'string' ? body.attendance : JSON.stringify(body.attendance || []);
 
+    const isCancelled = body.isCancelled !== undefined ? Boolean(body.isCancelled) : Boolean(existingEntry.isCancelled);
+    const status = body.status || (isCancelled ? 'Cancelled' : (existingEntry.status || 'Conducted'));
+    const cancellationCategory = body.cancellationCategory !== undefined ? body.cancellationCategory : (existingEntry.cancellationCategory || '');
+    const cancellationReason = body.cancellationReason !== undefined ? body.cancellationReason : (existingEntry.cancellationReason || '');
+
     runSql(
       `UPDATE class_diary SET 
-      facultyId = ?, facultyName = ?, department = ?, subjectCode = ?, subjectName = ?, batch = ?, classBatch = ?, room = ?, date = ?, startTime = ?, endTime = ?, topicTaught = ?, syllabusUnit = ?, teachingMethod = ?, learningOutcomes = ?, durationMins = ?, remarks = ?, attendance = ?, totalStudentsPresent = ?, totalEnrolledStudents = ?, absentRollNumbers = ?, updatedAt = ?
+      facultyId = ?, facultyName = ?, department = ?, subjectCode = ?, subjectName = ?, batch = ?, classBatch = ?, room = ?, date = ?, startTime = ?, endTime = ?, topicTaught = ?, syllabusUnit = ?, teachingMethod = ?, learningOutcomes = ?, durationMins = ?, remarks = ?, attendance = ?, totalStudentsPresent = ?, totalEnrolledStudents = ?, absentRollNumbers = ?, status = ?, isCancelled = ?, cancellationCategory = ?, cancellationReason = ?, updatedAt = ?
       WHERE id = ?`,
       [
         body.facultyId || existingEntry.facultyId,
@@ -1691,12 +1777,27 @@ async function startServer() {
         body.totalStudentsPresent !== undefined ? body.totalStudentsPresent : existingEntry.totalStudentsPresent,
         body.totalEnrolledStudents !== undefined ? body.totalEnrolledStudents : existingEntry.totalEnrolledStudents,
         JSON.stringify(body.absentRollNumbers || []),
+        status,
+        isCancelled ? 1 : 0,
+        cancellationCategory,
+        cancellationReason,
         updatedAt,
         id,
       ]
     );
 
-    res.json({ ...existingEntry, ...body, id, batch: batchVal, classBatch: batchVal, updatedAt });
+    res.json({
+      ...existingEntry,
+      ...body,
+      id,
+      status,
+      isCancelled,
+      cancellationCategory,
+      cancellationReason,
+      batch: batchVal,
+      classBatch: batchVal,
+      updatedAt
+    });
   });
 
   app.delete('/api/class-diary/:id', (req, res) => {
@@ -1720,7 +1821,73 @@ async function startServer() {
     }
 
     runSql('DELETE FROM class_diary WHERE id = ?', [id]);
+    try {
+      const allRows = queryAll('SELECT * FROM class_diary');
+      saveJsonToDisk('class_diary.json', allRows);
+    } catch (e) {}
     res.json({ success: true, message: 'Entry deleted successfully' });
+  });
+
+  app.post('/api/class-diary/import', (req, res) => {
+    const { entries, replaceExisting } = req.body;
+    if (!Array.isArray(entries)) {
+      res.status(400).json({ error: 'Expected entries array' });
+      return;
+    }
+
+    if (replaceExisting) {
+      runSql('DELETE FROM class_diary');
+    }
+
+    entries.forEach((entry: any) => {
+      const id = entry.id || `diary_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const startTimestamp = entry.classStartTimestamp || new Date(`${entry.date || '2026-08-14'}T${entry.startTime || '09:00'}`).getTime();
+      const batchVal = entry.batch || entry.classBatch || '';
+      const attendanceJson = typeof entry.attendance === 'string' ? entry.attendance : JSON.stringify(entry.attendance || []);
+      const absentJson = typeof entry.absentRollNumbers === 'string' ? entry.absentRollNumbers : JSON.stringify(entry.absentRollNumbers || []);
+
+      runSql(
+        `INSERT OR REPLACE INTO class_diary 
+        (id, facultyId, facultyName, department, timetableEntryId, subjectCode, subjectName, batch, classBatch, room, date, startTime, endTime, topicTaught, syllabusUnit, teachingMethod, learningOutcomes, durationMins, remarks, attendance, totalStudentsPresent, totalEnrolledStudents, absentRollNumbers, classStartTimestamp, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          entry.facultyId || 'fac_1',
+          entry.facultyName || 'Dr. Deborshee Gogoi',
+          entry.department || 'Commerce',
+          entry.timetableEntryId || '',
+          entry.subjectCode || '',
+          entry.subjectName || '',
+          batchVal,
+          batchVal,
+          entry.room || 'Room No. C1',
+          entry.date || '2026-08-14',
+          entry.startTime || '09:00',
+          entry.endTime || '10:00',
+          entry.topicTaught || 'Lecture',
+          entry.syllabusUnit || 'Unit 1',
+          entry.teachingMethod || 'Lecture',
+          entry.learningOutcomes || '',
+          Number(entry.durationMins) || 60,
+          entry.remarks || '',
+          attendanceJson,
+          entry.totalStudentsPresent || 40,
+          entry.totalEnrolledStudents || 45,
+          absentJson,
+          startTimestamp,
+          entry.createdAt || new Date().toISOString(),
+          entry.updatedAt || new Date().toISOString(),
+        ]
+      );
+    });
+
+    try {
+      const allRows = queryAll('SELECT * FROM class_diary');
+      saveJsonToDisk('class_diary.json', allRows);
+    } catch (e) {}
+
+    saveDbToDisk();
+    res.json({ success: true, count: entries.length });
   });
 
   // --- CALENDAR SQLITE ROUTES ---

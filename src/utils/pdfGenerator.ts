@@ -79,14 +79,20 @@ export function generateFacultyClassDiaryPDF(
   doc.setDrawColor(203, 213, 225);
   doc.rect(14, 30, 269, 22, 'S');
 
-  // Row 1: Faculty Name & Total Classes Taken
+  const conductedCount = entries.filter((e) => !e.isCancelled && e.status !== 'Cancelled').length;
+  const cancelledCount = entries.filter((e) => e.isCancelled || e.status === 'Cancelled').length;
+
+  // Row 1: Faculty Name & Total Classes Taken / Breakdown
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text(`Faculty Name: ${faculty.name}`, 18, 37);
 
   doc.setTextColor(30, 64, 175); // blue-800
-  doc.text(`Total Classes Taken: ${entries.length} Classes`, 175, 37);
+  const countSummary = cancelledCount > 0 
+    ? `${conductedCount} Taken, ${cancelledCount} Cancelled (${entries.length} Total)`
+    : `${entries.length} Classes Taken`;
+  doc.text(`Total Classes: ${countSummary}`, 175, 37);
 
   // Row 2: Subject & Time Period
   doc.setFontSize(9.5);
@@ -112,10 +118,13 @@ export function generateFacultyClassDiaryPDF(
     const lockWindowMs = 24 * 60 * 60 * 1000;
     const startMs = e.classStartTimestamp || new Date(`${e.date}T${e.startTime}`).getTime();
     const isLocked = Date.now() - startMs > lockWindowMs;
-    const verifiedStatus = isLocked ? 'Verified (Locked)' : 'Provisional (<24h)';
+    const isCancelled = Boolean(e.isCancelled || e.status === 'Cancelled');
+    const verifiedStatus = isCancelled 
+      ? (isLocked ? 'Cancelled (Locked)' : 'Cancelled (<24h)')
+      : (isLocked ? 'Verified (Locked)' : 'Provisional (<24h)');
 
-    let attText = 'N/A';
-    if (e.attendance && e.attendance.length > 0) {
+    let attText = isCancelled ? 'N/A (Cancelled)' : 'N/A';
+    if (!isCancelled && e.attendance && e.attendance.length > 0) {
       const present = e.attendance.filter((a) => a.status === 'Present' || a.status === 'Late').length;
       attText = `${present}/${e.attendance.length} (${Math.round((present / e.attendance.length) * 100)}%)`;
     }
@@ -127,13 +136,20 @@ export function generateFacultyClassDiaryPDF(
     const classBatch = e.batch || '';
     const subjectInfo = e.subjectCode ? `${e.subjectCode}\n${e.subjectName}` : e.subjectName;
 
-    // Detailed topic & syllabus unit details entered during 24h
-    let details = e.topicTaught || 'Class Lecture';
-    if (e.syllabusUnit) {
-      details += `\n[Unit: ${e.syllabusUnit}]`;
-    }
-    if (e.remarks) {
-      details += `\nNote: ${e.remarks}`;
+    // Detailed topic & syllabus unit or cancellation details
+    let details = '';
+    if (isCancelled) {
+      const cat = e.cancellationCategory || 'Class Cancelled / Not Taken';
+      const reason = e.cancellationReason ? `Reason: ${e.cancellationReason}` : '';
+      details = `[CANCELLED - ${cat.toUpperCase()}]${reason ? '\n' + reason : ''}${e.remarks ? '\nNote: ' + e.remarks : ''}`;
+    } else {
+      details = e.topicTaught || 'Class Lecture';
+      if (e.syllabusUnit) {
+        details += `\n[Unit: ${e.syllabusUnit}]`;
+      }
+      if (e.remarks) {
+        details += `\nNote: ${e.remarks}`;
+      }
     }
 
     return [

@@ -198,6 +198,7 @@ export interface ClassDiaryEntry {
   facultyId: string;
   facultyName: string;
   department: string;
+  timetableEntryId?: string;
   date: string; // YYYY-MM-DD
   startTime: string; // HH:mm
   endTime: string;   // HH:mm
@@ -205,16 +206,26 @@ export interface ClassDiaryEntry {
   subjectCode: string;
   subjectName: string;
   batch: string;
+  classBatch?: string;
   room: string;
   topicTaught: string;
   syllabusUnit?: string;
+  teachingMethod?: string;
+  learningOutcomes?: string;
   durationMins: number;
   remarks?: string;
+  totalStudentsPresent?: number;
+  totalEnrolledStudents?: number;
+  absentRollNumbers?: string[];
   attachments?: { name: string; url: string; size?: string }[];
   attendance?: AttendanceRecord[];
   createdAt: string;
   updatedAt: string;
   isSynced?: boolean;
+  status?: 'Conducted' | 'Cancelled' | 'Not_Taken';
+  isCancelled?: boolean;
+  cancellationCategory?: string; // e.g. 'Institutional Holiday', 'Faculty Leave', 'Official Deputation / OD', 'Exam Duty', 'College Event', 'Weather / Bandh', 'Other'
+  cancellationReason?: string;
 }
 
 export interface SyllabusTopic {

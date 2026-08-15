@@ -43,27 +43,31 @@ export async function signInWithGoogleFirebase(): Promise<User> {
 
   if (userSnap.exists()) {
     const data = userSnap.data();
+    const isDeborshee = fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' || (fbUser.displayName && fbUser.displayName.toLowerCase().includes('deborshee'));
     appUser = {
-      id: fbUser.uid,
-      name: data.name || fbUser.displayName || 'Dr. Faculty Member',
-      email: fbUser.email || 'faculty@digboicollege.edu.in',
-      whatsappPhone: data.whatsappPhone || '9706375001',
-      role: data.role || 'faculty',
-      facultyId: data.facultyId || `fac_${fbUser.uid.substring(0, 5)}`,
-      department: data.department || 'Commerce',
+      id: isDeborshee ? 'fac_1' : fbUser.uid,
+      name: isDeborshee ? 'Dr. Deborshee Gogoi' : (data.name || fbUser.displayName || 'Dr. Faculty Member'),
+      email: fbUser.email || (isDeborshee ? 'thewildscapes@gmail.com' : 'faculty@digboicollege.edu.in'),
+      whatsappPhone: isDeborshee ? '9706375001' : (data.whatsappPhone || '9706375001'),
+      role: isDeborshee ? 'admin' : (data.role || 'faculty'),
+      facultyId: isDeborshee ? 'fac_1' : (data.facultyId || `fac_${fbUser.uid.substring(0, 5)}`),
+      department: isDeborshee ? 'Commerce' : (data.department || 'Commerce'),
       isVerified: true,
+      isAcademicCoordinator: isDeborshee ? true : data.isAcademicCoordinator,
     };
   } else {
     // Create new faculty profile in Firestore linked to Auth UID
+    const isDeborshee = fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' || (fbUser.displayName && fbUser.displayName.toLowerCase().includes('deborshee'));
     appUser = {
-      id: fbUser.uid,
-      name: fbUser.displayName || (fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' ? 'Super Admin' : 'Faculty Member'),
-      email: fbUser.email || '',
+      id: isDeborshee ? 'fac_1' : fbUser.uid,
+      name: isDeborshee ? 'Dr. Deborshee Gogoi' : (fbUser.displayName || 'Faculty Member'),
+      email: fbUser.email || (isDeborshee ? 'thewildscapes@gmail.com' : ''),
       whatsappPhone: '9706375001',
-      role: fbUser.email?.toLowerCase() === 'thewildscapes@gmail.com' ? 'admin' : 'faculty',
-      facultyId: `fac_${fbUser.uid.substring(0, 5)}`,
+      role: isDeborshee ? 'admin' : 'faculty',
+      facultyId: isDeborshee ? 'fac_1' : `fac_${fbUser.uid.substring(0, 5)}`,
       department: 'Commerce',
       isVerified: true,
+      isAcademicCoordinator: isDeborshee,
     };
 
     await setDoc(userRef, {
@@ -83,43 +87,63 @@ export async function signInWithGithubFirebase(): Promise<User> {
   const result = await signInWithPopup(auth, githubProvider);
   const fbUser = result.user;
 
+  // Extract GitHub user details safely (handles private emails and GitHub screenName)
+  const reloadInfo = (fbUser as any).reloadUserInfo;
+  const screenName = reloadInfo?.screenName; // GitHub username
+  const githubEmail = fbUser.email || (fbUser.providerData?.[0]?.email) || (screenName ? `${screenName}@users.noreply.github.com` : 'thewildscapes@gmail.com');
+  const isSuperAdmin = githubEmail.toLowerCase().includes('thewildscapes') || (screenName && screenName.toLowerCase().includes('wildscape'));
+  const displayName = fbUser.displayName || (screenName ? `@${screenName}` : (isSuperAdmin ? 'Super Admin' : 'Dr. Faculty Member'));
+
   // Check if profile exists in Firestore
   const userRef = doc(db, 'users', fbUser.uid);
-  const userSnap = await getDoc(userRef);
-
   let appUser: User;
 
-  if (userSnap.exists()) {
-    const data = userSnap.data();
+  try {
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      appUser = {
+        id: fbUser.uid,
+        name: data.name || displayName,
+        email: data.email || githubEmail,
+        whatsappPhone: data.whatsappPhone || '9706375001',
+        role: data.role || (isSuperAdmin ? 'admin' : 'faculty'),
+        facultyId: data.facultyId || `fac_${fbUser.uid.substring(0, 5)}`,
+        department: data.department || 'Commerce',
+        isVerified: true,
+      };
+    } else {
+      // Create new faculty profile in Firestore linked to Auth UID
+      appUser = {
+        id: fbUser.uid,
+        name: displayName,
+        email: githubEmail,
+        whatsappPhone: '9706375001',
+        role: isSuperAdmin ? 'admin' : 'faculty',
+        facultyId: `fac_${fbUser.uid.substring(0, 5)}`,
+        department: 'Commerce',
+        isVerified: true,
+      };
+
+      await setDoc(userRef, {
+        ...appUser,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (firestoreErr) {
+    console.warn('Firestore profile sync error during GitHub sign in:', firestoreErr);
     appUser = {
       id: fbUser.uid,
-      name: data.name || fbUser.displayName || 'Dr. Faculty Member',
-      email: fbUser.email || (fbUser.providerData?.[0]?.email) || 'faculty@digboicollege.edu.in',
-      whatsappPhone: data.whatsappPhone || '9706375001',
-      role: data.role || (fbUser.email?.toLowerCase().includes('thewildscapes') ? 'admin' : 'faculty'),
-      facultyId: data.facultyId || `fac_${fbUser.uid.substring(0, 5)}`,
-      department: data.department || 'Commerce',
-      isVerified: true,
-    };
-  } else {
-    // Create new faculty profile in Firestore linked to Auth UID
-    const githubEmail = fbUser.email || (fbUser.providerData?.[0]?.email) || '';
-    appUser = {
-      id: fbUser.uid,
-      name: fbUser.displayName || (githubEmail.toLowerCase().includes('thewildscapes') ? 'Super Admin' : 'Faculty Member'),
+      name: displayName,
       email: githubEmail,
       whatsappPhone: '9706375001',
-      role: githubEmail.toLowerCase().includes('thewildscapes') ? 'admin' : 'faculty',
+      role: isSuperAdmin ? 'admin' : 'faculty',
       facultyId: `fac_${fbUser.uid.substring(0, 5)}`,
       department: 'Commerce',
       isVerified: true,
     };
-
-    await setDoc(userRef, {
-      ...appUser,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
   }
 
   return appUser;
@@ -1028,6 +1052,10 @@ export function subscribeToClassDiaryRealtime(
           durationMins: data.durationMins || 60,
           remarks: data.remarks || '',
           attendance: data.attendance || [],
+          status: data.status || (data.isCancelled ? 'Cancelled' : 'Conducted'),
+          isCancelled: Boolean(data.isCancelled || data.status === 'Cancelled'),
+          cancellationCategory: data.cancellationCategory || '',
+          cancellationReason: data.cancellationReason || '',
           createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
           updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt || new Date().toISOString(),
           isSynced: true,

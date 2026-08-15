@@ -12,6 +12,7 @@ import {
   CartesianGrid,
 } from 'recharts';
 import { ClassDiaryEntry, AttendanceRecord, SyllabusTopic, User, TimetableEntry, Student, Faculty } from '../types';
+import { INITIAL_CLASS_DIARY } from '../data/initialData';
 import {
   subscribeToClassDiaryRealtime,
   saveClassDiaryToFirestore,
@@ -53,6 +54,13 @@ import {
   ShieldCheck,
   Smartphone,
   UserX,
+  XCircle,
+  CalendarOff,
+  Ban,
+  HelpCircle,
+  Info,
+  CalendarDays,
+  CheckSquare,
 } from 'lucide-react';
 import { isFacultyNameMatch } from '../utils/timeUtils';
 
@@ -63,6 +71,27 @@ interface ClassDiaryViewProps {
   students?: Student[];
   faculties?: Faculty[];
 }
+
+export const CANCELLATION_CATEGORIES = [
+  { id: 'holiday', label: '🏛️ Institutional / Gazetted Holiday', presetReason: 'Declared Institutional / State Holiday' },
+  { id: 'exam_duty', label: '📝 College / University Examination Duty', presetReason: 'Assigned to Examination Invigilation / Evaluation Duty' },
+  { id: 'on_duty', label: '✈️ Faculty On-Duty (OD) / Deputation', presetReason: 'Official College Deputation / Academic Conference / Committee Meeting' },
+  { id: 'leave', label: '🏥 Faculty Casual / Medical Leave', presetReason: 'Faculty on approved Casual / Medical Leave' },
+  { id: 'event', label: '🎓 College Fest / Sports / Youth Festival / Event', presetReason: 'College Annual Function / Youth Fest / Sports Meet' },
+  { id: 'emergency', label: '🌧️ Adverse Weather / Flood / Local Bandh / Emergency Closure', presetReason: 'Adverse weather conditions / Local Bandh emergency closure' },
+  { id: 'rescheduled', label: '🔄 Class Rescheduled / Special Adjustment', presetReason: 'Class rescheduled / to be compensated' },
+  { id: 'other', label: '✍️ Other Specific Reason', presetReason: '' },
+];
+
+export const COMMON_HOLIDAY_QUICK_PRESETS = [
+  'Independence Day Celebration',
+  'Janmashtami / State Gazetted Holiday',
+  'College Foundation Day',
+  'Exam Invigilation Duty',
+  'NAAC Peer Team Coordinator Meeting',
+  'District Level Bandh / Strike',
+  'Faculty Medical / Emergency Leave',
+];
 
 const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [];
 
@@ -99,25 +128,57 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   // Admin Scope: 'my_only' (own classes) vs 'all_faculty' (institutional master inspection)
   const [adminScope, setAdminScope] = useState<'my_only' | 'all_faculty'>('my_only');
 
+  // Resolve matching faculty profile from faculties directory to prevent empty counts on mobile/OTP login
+  const matchedFacultyProfile = useMemo(() => {
+    if (!currentUser || !Array.isArray(faculties) || faculties.length === 0) return null;
+    const cleanEmail = (currentUser.email || '').toLowerCase().trim();
+    const cleanPhone = (currentUser.whatsappPhone || (currentUser as any).phone || '').replace(/\D/g, '');
+    const cleanName = (currentUser.name || '').toLowerCase().trim();
+
+    return faculties.find((f) => {
+      if (currentUser.facultyId && f.id === currentUser.facultyId) return true;
+      if (currentUser.id && f.id === currentUser.id) return true;
+      if (cleanEmail && f.email && f.email.toLowerCase().trim() === cleanEmail) return true;
+      if (cleanPhone && f.phone && f.phone.replace(/\D/g, '').endsWith(cleanPhone.slice(-10))) return true;
+      if (cleanName && f.name && isFacultyNameMatch(f.name, currentUser.name)) return true;
+      return false;
+    }) || null;
+  }, [currentUser, faculties]);
+
   // Strict ownership verification: A faculty member can only ever see their own logged records
   const isOwnDiaryEntry = (e: ClassDiaryEntry): boolean => {
     if (isSuperAdmin && adminScope === 'all_faculty') return true;
 
     // Check direct ID match
-    const myIds = [currentUser.facultyId, currentUser.id, 'fac_1', 'fac_deborshee_gogoi'].filter(Boolean);
+    const myIds = [
+      currentUser.facultyId,
+      currentUser.id,
+      matchedFacultyProfile?.id,
+      'fac_1',
+      'fac_deborshee_gogoi',
+      'user_superadmin',
+    ].filter(Boolean);
     const directIdMatch = Boolean(e.facultyId && myIds.includes(e.facultyId));
 
     // Check Name match
-    const myNames = [currentUser.name, 'Dr. Deborshee Gogoi', 'Deborshee Gogoi'].filter(Boolean);
+    const myNames = [
+      currentUser.name,
+      matchedFacultyProfile?.name,
+      'Dr. Deborshee Gogoi',
+      'Deborshee Gogoi',
+    ].filter(Boolean);
     const nameMatch = Boolean(
       e.facultyName && myNames.some((n) => isFacultyNameMatch(e.facultyName, n!))
     );
 
     // If user is Deborshee Gogoi or email is thewildscapes@gmail.com or mobile is 9706375001, match Deborshee records
     const isDeborsheeUser = Boolean(
-      currentUser.email === 'thewildscapes@gmail.com' ||
-      (currentUser.whatsappPhone || '').includes('9706375001') ||
-      (currentUser.name && currentUser.name.toLowerCase().includes('deborshee'))
+      currentUser.email?.toLowerCase().includes('thewildscapes') ||
+      (currentUser.whatsappPhone || (currentUser as any).phone || '').includes('9706375001') ||
+      (currentUser.name && currentUser.name.toLowerCase().includes('deborshee')) ||
+      currentUser.facultyId === 'fac_1' ||
+      currentUser.id === 'fac_1' ||
+      currentUser.id === 'user_superadmin'
     );
     const isDeborsheeEntry = Boolean(
       (e.facultyName && e.facultyName.toLowerCase().includes('deborshee')) ||
@@ -136,7 +197,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed
+          const valid = parsed
             .filter((e: any) => e && !isExcludedSubject(e.subjectName, e.subjectCode))
             .map((e: any) => ({
               ...e,
@@ -144,17 +205,18 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
               topicTaught: e.topicTaught || '',
               subjectCode: e.subjectCode || '',
               subjectName: e.subjectName || '',
-              room: e.room || 'LH-01',
+              room: e.room || 'Room No. C1',
               department: e.department || 'Commerce',
               syllabusUnit: e.syllabusUnit || 'Unit 1',
               durationMins: e.durationMins || 60,
               remarks: e.remarks || '',
               attendance: e.attendance || [],
             }));
+          if (valid.length > 0) return valid;
         }
       }
     } catch (e) {}
-    return [];
+    return INITIAL_CLASS_DIARY;
   });
   const [syllabusTopics, setSyllabusTopics] = useState<SyllabusTopic[]>(DEFAULT_SYLLABUS_TOPICS);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -164,6 +226,13 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const [timePreset, setTimePreset] = useState<string>('aug_oct_2026');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [offlineDrafts, setOfflineDrafts] = useState<ClassDiaryEntry[]>([]);
+  const [classStatusFilter, setClassStatusFilter] = useState<'all' | 'pending' | 'taken' | 'conducted' | 'cancelled'>('all');
+
+  // Bulk Holiday / Cancel Day Modal state
+  const [isBulkCancelOpen, setIsBulkCancelOpen] = useState<boolean>(false);
+  const [bulkCancelDate, setBulkCancelDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [bulkCancelCategory, setBulkCancelCategory] = useState<string>('🏛️ Institutional / Gazetted Holiday');
+  const [bulkCancelReason, setBulkCancelReason] = useState<string>('Independence Day Celebration');
 
   // Dynamically extract unique subjects strictly from the master routine (timetable)
   const availableSubjects = useMemo(() => {
@@ -272,7 +341,216 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
       return matchSubject && matchDate && matchSearch;
     });
-  }, [diaryEntries, filterSubject, startDate, endDate, searchTerm, adminScope, isSuperAdmin, currentUser]);
+  }, [diaryEntries, filterSubject, startDate, endDate, searchTerm, adminScope, isSuperAdmin, currentUser, matchedFacultyProfile]);
+
+  // Ownership verification for timetable routine slots
+  const isOwnTimetableSlot = (t: TimetableEntry): boolean => {
+    if (isSuperAdmin && adminScope === 'all_faculty') return true;
+
+    const myIds = [
+      currentUser.facultyId,
+      currentUser.id,
+      matchedFacultyProfile?.id,
+      'fac_1',
+      'fac_deborshee_gogoi',
+      'user_superadmin',
+    ].filter(Boolean);
+    if (t.facultyId && myIds.includes(t.facultyId)) return true;
+
+    const myNames = [
+      currentUser.name,
+      matchedFacultyProfile?.name,
+      'Dr. Deborshee Gogoi',
+      'Deborshee Gogoi',
+    ].filter(Boolean);
+    if (t.facultyName && myNames.some((n) => isFacultyNameMatch(t.facultyName, n!))) return true;
+
+    const isDeborsheeUser = Boolean(
+      currentUser.email?.toLowerCase().includes('thewildscapes') ||
+      (currentUser.whatsappPhone || (currentUser as any).phone || '').includes('9706375001') ||
+      (currentUser.name && currentUser.name.toLowerCase().includes('deborshee')) ||
+      currentUser.facultyId === 'fac_1' ||
+      currentUser.id === 'fac_1' ||
+      currentUser.id === 'user_superadmin'
+    );
+    const isDeborsheeEntry = Boolean(
+      (t.facultyName && t.facultyName.toLowerCase().includes('deborshee')) ||
+      t.facultyId === 'fac_1' ||
+      t.facultyId === 'fac_deborshee_gogoi'
+    );
+    if (isDeborsheeUser && isDeborsheeEntry) return true;
+
+    return false;
+  };
+
+  // Scheduled classes that have not yet been logged in the Class Diary
+  const filteredPendingClasses = useMemo(() => {
+    const matchingSlots = (timetable || []).filter((t) => {
+      if (!isOwnTimetableSlot(t)) return false;
+      if (isExcludedSubject(t.subjectName, t.subjectCode)) return false;
+      const matchSubject =
+        filterSubject === 'All' ||
+        t.subjectCode === filterSubject ||
+        t.subjectName === filterSubject;
+      return matchSubject;
+    });
+
+    if (matchingSlots.length === 0) return [];
+
+    // Generate relevant dates based on startDate/endDate or default timeframe
+    const datesToCheck: string[] = [];
+    const startStr = startDate || '2026-08-01';
+    const endStr = endDate || '2026-08-31';
+
+    try {
+      const start = new Date(startStr + 'T00:00:00');
+      const end = new Date(endStr + 'T00:00:00');
+      if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
+        const cur = new Date(start);
+        let count = 0;
+        while (cur <= end && count < 60) {
+          datesToCheck.push(cur.toISOString().split('T')[0]);
+          cur.setDate(cur.getDate() + 1);
+          count++;
+        }
+      }
+    } catch (e) {}
+
+    if (datesToCheck.length === 0) {
+      datesToCheck.push('2026-08-14', '2026-08-15', '2026-08-17', '2026-08-18');
+    }
+
+    const pendingList: Array<{
+      id: string;
+      isPending: true;
+      timetableEntryId: string;
+      date: string;
+      day: string;
+      startTime: string;
+      endTime: string;
+      durationMins: number;
+      subjectCode: string;
+      subjectName: string;
+      batch: string;
+      room: string;
+      facultyId: string;
+      facultyName: string;
+      department: string;
+    }> = [];
+
+    datesToCheck.forEach((dt) => {
+      const dayName = getDayOfWeek(dt);
+      const slotsOnDay = matchingSlots.filter((t) => t.day.toLowerCase() === dayName.toLowerCase());
+
+      slotsOnDay.forEach((slot) => {
+        // Check if a diary entry exists for this date, time, and subject
+        const hasDiary = diaryEntries.some((e) => {
+          if (!isOwnDiaryEntry(e)) return false;
+          if (e.date !== dt) return false;
+          const sameSubject =
+            (e.subjectCode && slot.subjectCode && e.subjectCode.toLowerCase() === slot.subjectCode.toLowerCase()) ||
+            (e.subjectName && slot.subjectName && e.subjectName.toLowerCase() === slot.subjectName.toLowerCase());
+          const sameTime = e.startTime === slot.startTime || e.timetableEntryId === slot.id;
+          return sameSubject && sameTime;
+        });
+
+        if (!hasDiary) {
+          const searchTarget = `${slot.subjectCode} ${slot.subjectName} ${slot.batch} ${slot.room} ${slot.facultyName}`.toLowerCase();
+          if (!searchTerm.trim() || searchTarget.includes(searchTerm.toLowerCase())) {
+            pendingList.push({
+              id: `pending_${slot.id}_${dt}`,
+              isPending: true,
+              timetableEntryId: slot.id,
+              date: dt,
+              day: dayName,
+              startTime: slot.startTime,
+              endTime: slot.endTime,
+              durationMins: 60,
+              subjectCode: slot.subjectCode,
+              subjectName: slot.subjectName,
+              batch: slot.batch || '',
+              room: slot.room || 'Room No. C1',
+              facultyId: slot.facultyId || currentUser.facultyId || 'fac_1',
+              facultyName: slot.facultyName || currentUser.name || 'Faculty Member',
+              department: slot.department || currentUser.department || 'Commerce',
+            });
+          }
+        }
+      });
+    });
+
+    return pendingList;
+  }, [timetable, diaryEntries, filterSubject, startDate, endDate, searchTerm, currentUser, matchedFacultyProfile, adminScope, isSuperAdmin]);
+
+  // Combined/Filtered display list based on class status ('all' | 'pending' | 'taken' / 'conducted' | 'cancelled')
+  const displayClassList = useMemo(() => {
+    const conductedEntries = filteredDiaryEntries.filter((e) => !e.isCancelled && e.status !== 'Cancelled');
+    const cancelledEntries = filteredDiaryEntries.filter((e) => Boolean(e.isCancelled || e.status === 'Cancelled'));
+
+    if (classStatusFilter === 'pending') {
+      return [...filteredPendingClasses].sort((a, b) => b.date.localeCompare(a.date) || a.startTime.localeCompare(b.startTime));
+    }
+    if (classStatusFilter === 'taken' || classStatusFilter === 'conducted') {
+      return conductedEntries.map((e) => ({ ...e, isPending: false as const }));
+    }
+    if (classStatusFilter === 'cancelled') {
+      return cancelledEntries.map((e) => ({ ...e, isPending: false as const }));
+    }
+    // 'all': Show All Classes (conducted, cancelled, and pending)
+    const combined: Array<(ClassDiaryEntry & { isPending?: false }) | (typeof filteredPendingClasses)[0]> = [
+      ...filteredDiaryEntries.map((e) => ({ ...e, isPending: false as const })),
+      ...filteredPendingClasses,
+    ];
+    return combined.sort((a, b) => {
+      const dateA = a.date || '';
+      const dateB = b.date || '';
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      return (a.startTime || '').localeCompare(b.startTime || '');
+    });
+  }, [classStatusFilter, filteredDiaryEntries, filteredPendingClasses]);
+
+  // Diagnostic logging to inspect timetable prop length, entry IDs, and faculty filtering results
+  useEffect(() => {
+    console.group(`[ClassDiaryView Diagnostic] User: ${currentUser?.name || 'Anonymous'} (${currentUser?.id || 'no-id'})`);
+    console.log('User Profile:', {
+      id: currentUser?.id,
+      facultyId: currentUser?.facultyId,
+      name: currentUser?.name,
+      email: currentUser?.email,
+      role: currentUser?.role,
+      whatsappPhone: currentUser?.whatsappPhone,
+      isAcademicCoordinator: currentUser?.isAcademicCoordinator,
+      matchedFacultyProfile: matchedFacultyProfile ? { id: matchedFacultyProfile.id, name: matchedFacultyProfile.name } : null,
+    });
+    console.log(`Timetable Prop Length: ${timetable?.length || 0}`);
+    console.log('Timetable Individual Entry IDs & Subjects:', (timetable || []).map((t, index) => ({
+      index,
+      id: t.id,
+      facultyId: t.facultyId,
+      facultyName: t.facultyName,
+      subjectCode: t.subjectCode,
+      subjectName: t.subjectName,
+      day: t.day,
+      time: `${t.startTime}-${t.endTime}`,
+      room: t.room,
+      batch: t.batch,
+    })));
+    console.log(`Class Diary Total Entries Count: ${diaryEntries?.length || 0}`);
+    console.log(`Class Diary Filtered Entries Count: ${filteredDiaryEntries?.length || 0}`);
+    console.log('Class Diary Individual Entry Evaluation:', (diaryEntries || []).map((e) => ({
+      id: e.id,
+      facultyId: e.facultyId,
+      facultyName: e.facultyName,
+      subjectCode: e.subjectCode,
+      date: e.date,
+      time: `${e.startTime}-${e.endTime}`,
+      isOwnDiaryEntry: isOwnDiaryEntry(e),
+      batch: e.batch,
+      isCancelled: e.isCancelled,
+      status: e.status,
+    })));
+    console.groupEnd();
+  }, [currentUser, timetable, diaryEntries, filteredDiaryEntries, matchedFacultyProfile]);
 
   // Helper function to safely merge incoming diary entries into state and localStorage with slot deduplication
   const mergeEntries = (existing: ClassDiaryEntry[], incoming: ClassDiaryEntry[]): ClassDiaryEntry[] => {
@@ -299,6 +577,9 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       }
 
       const prev = entryMap.get(targetId);
+      const isCancelledVal = e.isCancelled !== undefined ? Boolean(e.isCancelled) : (e.status === 'Cancelled' ? true : (prev?.isCancelled || false));
+      const statusVal = e.status || (isCancelledVal ? 'Cancelled' : (prev?.status || 'Conducted'));
+
       entryMap.set(targetId, {
         ...prev,
         ...e,
@@ -309,10 +590,14 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
         subjectName: e.subjectName || prev?.subjectName || '',
         room: e.room || prev?.room || 'LH-01',
         department: e.department || prev?.department || 'Commerce',
-        syllabusUnit: e.syllabusUnit || prev?.syllabusUnit || 'Unit 1',
+        syllabusUnit: e.syllabusUnit || prev?.syllabusUnit || '',
         durationMins: e.durationMins || prev?.durationMins || 60,
         remarks: e.remarks || prev?.remarks || '',
         attendance: (e.attendance && e.attendance.length > 0) ? e.attendance : (prev?.attendance || []),
+        status: statusVal,
+        isCancelled: isCancelledVal,
+        cancellationCategory: e.cancellationCategory || prev?.cancellationCategory || '',
+        cancellationReason: e.cancellationReason || prev?.cancellationReason || '',
       });
     };
 
@@ -332,6 +617,11 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   // Modal form state
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+
+  // Status & Cancellation Form State
+  const [formStatus, setFormStatus] = useState<'Conducted' | 'Cancelled'>('Conducted');
+  const [formCancellationCategory, setFormCancellationCategory] = useState<string>('🏛️ Institutional / Gazetted Holiday');
+  const [formCancellationReason, setFormCancellationReason] = useState<string>('');
 
   // Manual Student Entry input state in modal
   const [manualRollNo, setManualRollNo] = useState<string>('');
@@ -355,6 +645,9 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   useEffect(() => {
     if (selectedClassForDiary) {
       setEditingEntryId(null);
+      setFormStatus('Conducted');
+      setFormCancellationCategory('🏛️ Institutional / Gazetted Holiday');
+      setFormCancellationReason('');
       setFormDate(new Date().toISOString().split('T')[0]);
       setFormStartTime(selectedClassForDiary.startTime || '09:00');
       setFormEndTime(selectedClassForDiary.endTime || '10:00');
@@ -451,6 +744,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
         }
       }
     } catch (err) {}
+    setDiaryEntries((prev) => mergeEntries(prev, INITIAL_CLASS_DIARY));
   };
 
   const loadOfflineDrafts = () => {
@@ -546,13 +840,17 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   };
 
   // Open Create/Edit Modal
-  const handleOpenModal = (entry?: ClassDiaryEntry) => {
+  const handleOpenModal = (entry?: ClassDiaryEntry, defaultStatus: 'Conducted' | 'Cancelled' = 'Conducted') => {
     if (entry) {
       if (checkIsLocked(entry)) {
         alert('This class diary entry is permanently locked because more than 24 hours have elapsed since the class start time.');
         return;
       }
       setEditingEntryId(entry.id);
+      const isCanc = Boolean(entry.isCancelled || entry.status === 'Cancelled');
+      setFormStatus(isCanc ? 'Cancelled' : 'Conducted');
+      setFormCancellationCategory(entry.cancellationCategory || '🏛️ Institutional / Gazetted Holiday');
+      setFormCancellationReason(entry.cancellationReason || '');
       setFormDate(entry.date);
       setFormStartTime(entry.startTime);
       setFormEndTime(entry.endTime);
@@ -560,14 +858,17 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       setFormSubjectName(entry.subjectName);
       setFormBatch(entry.batch);
       setFormRoom(entry.room);
-      setFormTopic(entry.topicTaught);
+      setFormTopic(entry.topicTaught || '');
       setFormSyllabusUnit(entry.syllabusUnit || '');
-      setFormDuration(entry.durationMins);
+      setFormDuration(entry.durationMins || 60);
       setFormRemarks(entry.remarks || '');
       setFormAttendance(entry.attendance || []);
     } else {
       const defaultSubj = availableSubjects[0];
       setEditingEntryId(null);
+      setFormStatus(defaultStatus);
+      setFormCancellationCategory('🏛️ Institutional / Gazetted Holiday');
+      setFormCancellationReason('');
       setFormDate(new Date().toISOString().split('T')[0]);
       setFormStartTime('09:00');
       setFormEndTime('10:00');
@@ -584,15 +885,61 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     setIsModalOpen(true);
   };
 
+  // Open modal directly prefilled for a pending timetable class
+  const handleOpenModalForPending = (
+    pending: {
+      date: string;
+      startTime: string;
+      endTime: string;
+      subjectCode: string;
+      subjectName: string;
+      batch: string;
+      room: string;
+      durationMins?: number;
+    },
+    targetStatus: 'Conducted' | 'Cancelled' = 'Conducted'
+  ) => {
+    setEditingEntryId(null);
+    setFormStatus(targetStatus);
+    setFormCancellationCategory('🏛️ Institutional / Gazetted Holiday');
+    setFormCancellationReason('');
+    setFormDate(pending.date);
+    setFormStartTime(pending.startTime);
+    setFormEndTime(pending.endTime);
+    setFormSubjectCode(pending.subjectCode);
+    setFormSubjectName(pending.subjectName);
+    setFormBatch(pending.batch);
+    setFormRoom(pending.room);
+    setFormTopic('');
+    setFormSyllabusUnit('');
+    setFormDuration(pending.durationMins || 60);
+    setFormRemarks('');
+    setFormAttendance([]);
+    setIsModalOpen(true);
+  };
+
   // Save Entry (Online or Offline Draft)
   const handleSaveEntry = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTopic.trim()) {
-      alert('Please describe the topic taught in class.');
-      return;
+    const isCanc = formStatus === 'Cancelled';
+
+    if (isCanc) {
+      if (!formCancellationCategory && !formCancellationReason.trim()) {
+        alert('Please specify the category or reason for the cancelled class.');
+        return;
+      }
+    } else {
+      if (!formTopic.trim()) {
+        alert('Please describe the topic taught in class.');
+        return;
+      }
     }
 
     const startTimestamp = new Date(`${formDate}T${formStartTime}`).getTime();
+
+    const topicFinal = isCanc
+      ? formTopic.trim() || `[Cancelled - ${formCancellationCategory}]${formCancellationReason.trim() ? ': ' + formCancellationReason.trim() : ''}`
+      : formTopic.trim();
 
     const newEntry: ClassDiaryEntry = {
       id: editingEntryId || `diary_${Date.now()}`,
@@ -607,11 +954,15 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       subjectName: formSubjectName,
       batch: formBatch,
       room: formRoom,
-      topicTaught: formTopic.trim(),
-      syllabusUnit: formSyllabusUnit,
+      topicTaught: topicFinal,
+      syllabusUnit: isCanc ? '' : formSyllabusUnit,
       durationMins: formDuration,
       remarks: formRemarks.trim(),
-      attendance: formAttendance,
+      attendance: isCanc ? [] : formAttendance,
+      status: isCanc ? 'Cancelled' : 'Conducted',
+      isCancelled: isCanc,
+      cancellationCategory: isCanc ? formCancellationCategory : undefined,
+      cancellationReason: isCanc ? formCancellationReason.trim() : undefined,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isSynced: isOnline,
@@ -619,7 +970,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
     if (!isOnline) {
       // Save to offline drafts
-      const updatedDrafts = [...offlineDrafts.filter(d => d.id !== newEntry.id), newEntry];
+      const updatedDrafts = [...offlineDrafts.filter((d) => d.id !== newEntry.id), newEntry];
       setOfflineDrafts(updatedDrafts);
       localStorage.setItem('classpilot_diary_offline_drafts', JSON.stringify(updatedDrafts));
       alert('Network offline: Entry saved locally as a draft. It will automatically sync when back online.');
@@ -647,8 +998,123 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     }
 
     setDiaryEntries((prev) => mergeEntries(prev, [newEntry]));
-
     setIsModalOpen(false);
+  };
+
+  // Bulk Mark Classes on a specific Date as Cancelled / Holiday
+  const handleBulkCancelDate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkCancelDate) {
+      alert('Please select a date to mark as Holiday / Cancelled.');
+      return;
+    }
+
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dateObj = new Date(bulkCancelDate + 'T00:00:00');
+    if (isNaN(dateObj.getTime())) {
+      alert('Invalid date selected.');
+      return;
+    }
+    const dayOfWeek = dayNames[dateObj.getDay()];
+
+    // Find own timetable routine slots for that day
+    const matchingSlots = (timetable || []).filter((t) => {
+      if (t.day !== dayOfWeek) return false;
+      const isMine =
+        (t.facultyId && currentUser.facultyId && t.facultyId === currentUser.facultyId) ||
+        isFacultyNameMatch(t.facultyName, currentUser.name);
+      return isMine;
+    });
+
+    if (matchingSlots.length === 0) {
+      // Still allow creating a generic non-teaching holiday record for the day
+      const generalEntry: ClassDiaryEntry = {
+        id: `diary_bulk_${Date.now()}`,
+        facultyId: currentUser.facultyId || 'fac_1',
+        facultyName: currentUser.name || 'Faculty Member',
+        department: currentUser.department || 'Commerce',
+        date: bulkCancelDate,
+        startTime: '09:00',
+        endTime: '16:00',
+        classStartTimestamp: new Date(`${bulkCancelDate}T09:00`).getTime(),
+        subjectCode: 'HOLIDAY',
+        subjectName: bulkCancelCategory,
+        batch: 'All Batches',
+        room: 'College Campus',
+        topicTaught: `[${bulkCancelCategory.toUpperCase()}] ${bulkCancelReason.trim() || 'Institutional Holiday / Classes Cancelled'}`,
+        syllabusUnit: '',
+        durationMins: 360,
+        remarks: bulkCancelReason.trim(),
+        attendance: [],
+        status: 'Cancelled',
+        isCancelled: true,
+        cancellationCategory: bulkCancelCategory,
+        cancellationReason: bulkCancelReason.trim(),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isSynced: isOnline,
+      };
+
+      await saveClassDiaryToFirestore(generalEntry);
+      try {
+        await fetch('/api/class-diary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(generalEntry),
+        });
+      } catch (err) {}
+
+      setDiaryEntries((prev) => mergeEntries(prev, [generalEntry]));
+      setIsBulkCancelOpen(false);
+      alert(`Marked ${bulkCancelDate} as ${bulkCancelCategory}. 1 entry recorded.`);
+      return;
+    }
+
+    const createdEntries: ClassDiaryEntry[] = [];
+    for (const slot of matchingSlots) {
+      const startMs = new Date(`${bulkCancelDate}T${slot.startTime}`).getTime();
+      const newEntry: ClassDiaryEntry = {
+        id: `diary_bulk_${slot.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        facultyId: slot.facultyId || currentUser.facultyId || 'fac_1',
+        facultyName: slot.facultyName || currentUser.name || 'Faculty Member',
+        department: slot.department || currentUser.department || 'Commerce',
+        date: bulkCancelDate,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        classStartTimestamp: startMs,
+        subjectCode: slot.subjectCode,
+        subjectName: slot.subjectName,
+        batch: slot.batch || '',
+        room: slot.room || '',
+        topicTaught: `[CANCELLED - ${bulkCancelCategory}] ${bulkCancelReason.trim() || 'Class not conducted on account of ' + bulkCancelCategory}`,
+        syllabusUnit: '',
+        durationMins: 60,
+        remarks: bulkCancelReason.trim(),
+        attendance: [],
+        status: 'Cancelled',
+        isCancelled: true,
+        cancellationCategory: bulkCancelCategory,
+        cancellationReason: bulkCancelReason.trim(),
+        timetableEntryId: slot.id,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isSynced: isOnline,
+      };
+
+      createdEntries.push(newEntry);
+      await saveClassDiaryToFirestore(newEntry);
+      try {
+        await fetch('/api/class-diary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newEntry),
+        });
+      } catch (err) {}
+    }
+
+    setDiaryEntries((prev) => mergeEntries(prev, createdEntries));
+    setIsBulkCancelOpen(false);
+    alert(`Successfully marked all ${createdEntries.length} classes on ${bulkCancelDate} as Cancelled (${bulkCancelCategory}).`);
   };
 
   // Sync Offline Drafts
@@ -695,36 +1161,50 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
   // Aggregated Summary Statistics for the Selected Subject & Timeframe
   const filteredStats = useMemo(() => {
-    const totalClasses = filteredDiaryEntries.length;
+    let conductedClasses = 0;
+    let cancelledClasses = 0;
     let totalMinutes = 0;
     let totalRosterAttended = 0;
     let totalRosterCount = 0;
     const unitsCovered = new Set<string>();
     const batchesSet = new Set<string>();
+    const cancelCategoryCounts: Record<string, number> = {};
 
     filteredDiaryEntries.forEach((e) => {
-      totalMinutes += e.durationMins || 60;
-      if (e.syllabusUnit && e.syllabusUnit.trim()) {
-        unitsCovered.add(e.syllabusUnit.trim());
-      }
-      if (e.batch && e.batch.trim()) {
-        batchesSet.add(e.batch.trim());
-      }
-      if (e.attendance && e.attendance.length > 0) {
-        e.attendance.forEach((a) => {
-          totalRosterCount += 1;
-          if (a.status === 'Present' || a.status === 'Late') {
-            totalRosterAttended += 1;
-          }
-        });
+      const isCanc = Boolean(e.isCancelled || e.status === 'Cancelled');
+      if (isCanc) {
+        cancelledClasses += 1;
+        const cat = e.cancellationCategory || 'Institutional Holiday / Other';
+        cancelCategoryCounts[cat] = (cancelCategoryCounts[cat] || 0) + 1;
+      } else {
+        conductedClasses += 1;
+        totalMinutes += e.durationMins || 60;
+        if (e.syllabusUnit && e.syllabusUnit.trim()) {
+          unitsCovered.add(e.syllabusUnit.trim());
+        }
+        if (e.batch && e.batch.trim()) {
+          batchesSet.add(e.batch.trim());
+        }
+        if (e.attendance && e.attendance.length > 0) {
+          e.attendance.forEach((a) => {
+            totalRosterCount += 1;
+            if (a.status === 'Present' || a.status === 'Late') {
+              totalRosterAttended += 1;
+            }
+          });
+        }
       }
     });
 
+    const totalClasses = conductedClasses + cancelledClasses;
     const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
     const avgAttendancePercent = totalRosterCount > 0 ? Math.round((totalRosterAttended / totalRosterCount) * 100) : 100;
 
     return {
       totalClasses,
+      conductedClasses,
+      cancelledClasses,
+      cancelCategoryCounts,
       totalHours,
       totalMinutes,
       avgAttendancePercent,
@@ -737,7 +1217,9 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
   // Workload Progress: Classes Taken vs Total Scheduled for Selected Subject & Timeframe
   const workloadProgress = useMemo(() => {
-    const classesTaken = filteredDiaryEntries.length;
+    const conductedCount = filteredDiaryEntries.filter((e) => !e.isCancelled && e.status !== 'Cancelled').length;
+    const cancelledCount = filteredDiaryEntries.filter((e) => Boolean(e.isCancelled || e.status === 'Cancelled')).length;
+    const classesTaken = conductedCount;
 
     // Filter matching routine timetable slots for the subject
     const matchingTimetableSlots = timetable.filter((t) => {
@@ -782,13 +1264,13 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       scheduledCount = (matchingTimetableSlots.length > 0 ? matchingTimetableSlots.length : multiplier) * 14;
     }
 
-    // Scheduled is at least equal to classes taken
-    const finalScheduled = Math.max(scheduledCount, classesTaken, 1);
-    const percentage = Math.min(100, Math.round((classesTaken / finalScheduled) * 100));
-    const remaining = Math.max(0, finalScheduled - classesTaken);
+    // Scheduled is at least equal to classes taken + cancelled
+    const finalScheduled = Math.max(scheduledCount, conductedCount + cancelledCount, 1);
+    const percentage = Math.min(100, Math.round((conductedCount / finalScheduled) * 100));
+    const remaining = Math.max(0, finalScheduled - (conductedCount + cancelledCount));
 
     // Monthly breakdown of classes taken vs expected in the selected range
-    const monthlyMap: Record<string, { monthLabel: string; taken: number; scheduled: number; hours: number }> = {};
+    const monthlyMap: Record<string, { monthLabel: string; taken: number; cancelled: number; scheduled: number; hours: number }> = {};
 
     filteredDiaryEntries.forEach((e) => {
       if (e.date) {
@@ -800,10 +1282,14 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
           : ym;
 
         if (!monthlyMap[ym]) {
-          monthlyMap[ym] = { monthLabel, taken: 0, scheduled: 4, hours: 0 };
+          monthlyMap[ym] = { monthLabel, taken: 0, cancelled: 0, scheduled: 4, hours: 0 };
         }
-        monthlyMap[ym].taken += 1;
-        monthlyMap[ym].hours += (e.durationMins || 60) / 60;
+        if (e.isCancelled || e.status === 'Cancelled') {
+          monthlyMap[ym].cancelled += 1;
+        } else {
+          monthlyMap[ym].taken += 1;
+          monthlyMap[ym].hours += (e.durationMins || 60) / 60;
+        }
       }
     });
 
@@ -817,7 +1303,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
           const ym = cur.toISOString().substring(0, 7);
           if (!monthlyMap[ym]) {
             const monthLabel = cur.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-            monthlyMap[ym] = { monthLabel, taken: 0, scheduled: 4, hours: 0 };
+            monthlyMap[ym] = { monthLabel, taken: 0, cancelled: 0, scheduled: 4, hours: 0 };
           }
           cur.setMonth(cur.getMonth() + 1);
         }
@@ -827,12 +1313,13 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     const monthlyBreakdown = Object.entries(monthlyMap)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([ym, data]) => {
-        const estScheduled = Math.max(data.taken, data.scheduled || 4);
+        const estScheduled = Math.max(data.taken + data.cancelled, data.scheduled || 4);
         const pct = Math.min(100, Math.round((data.taken / estScheduled) * 100));
         return {
           ym,
           monthLabel: data.monthLabel,
           taken: data.taken,
+          cancelled: data.cancelled,
           scheduled: estScheduled,
           pct,
           hours: Math.round(data.hours * 10) / 10,
@@ -840,7 +1327,9 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       });
 
     return {
-      classesTaken,
+      classesTaken: conductedCount,
+      conductedCount,
+      cancelledCount,
       scheduledCount: finalScheduled,
       percentage,
       remaining,
@@ -1205,16 +1694,26 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
               </div>
             </div>
 
-            {/* 4 Micro Metric Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {/* 5 Micro Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
               <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
                   Conducted
                 </span>
                 <span className="text-xl font-extrabold text-white mt-1 block">
-                  {workloadProgress.classesTaken}
+                  {filteredStats.conductedClasses}
                 </span>
-                <span className="text-[10px] text-emerald-400 font-semibold">Verified in Log</span>
+                <span className="text-[10px] text-emerald-400 font-semibold">Taught & Logged</span>
+              </div>
+
+              <div className="bg-slate-800/60 border border-rose-500/30 rounded-xl p-3 bg-rose-500/5">
+                <span className="text-[10px] font-bold text-rose-300 uppercase tracking-wider block">
+                  Cancelled / Off
+                </span>
+                <span className="text-xl font-extrabold text-rose-300 mt-1 block">
+                  {filteredStats.cancelledClasses}
+                </span>
+                <span className="text-[10px] text-rose-400 font-semibold">Holidays / Leave</span>
               </div>
 
               <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
@@ -1224,7 +1723,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                 <span className="text-xl font-extrabold text-blue-300 mt-1 block">
                   {workloadProgress.scheduledCount}
                 </span>
-                <span className="text-[10px] text-blue-400 font-semibold">Timetable Target</span>
+                <span className="text-[10px] text-blue-400 font-semibold">Routine Target</span>
               </div>
 
               <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
@@ -1430,11 +1929,29 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
             </button>
 
             <button
-              onClick={() => handleOpenModal()}
+              onClick={() => setIsBulkCancelOpen(true)}
+              className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 hover:text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm"
+              title="Mark Entire Day or Selected Date as Holiday / Classes Cancelled"
+            >
+              <CalendarOff className="w-3.5 h-3.5 text-rose-400" />
+              <span>Mark Holiday / Cancel Day</span>
+            </button>
+
+            <button
+              onClick={() => handleOpenModal(undefined, 'Cancelled')}
+              className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="Record a single Cancelled Class entry"
+            >
+              <Ban className="w-3.5 h-3.5 text-amber-400" />
+              <span>Mark Cancelled Class</span>
+            </button>
+
+            <button
+              onClick={() => handleOpenModal(undefined, 'Conducted')}
               className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-blue-600/20 flex items-center space-x-1.5 transition-all cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Log New Class</span>
+              <span>Log Conducted Class</span>
             </button>
           </div>
         </div>
@@ -1450,7 +1967,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
             }`}
           >
             <FileText className="w-4 h-4" />
-            <span>Class Log Entries ({filteredDiaryEntries.length})</span>
+            <span>Class Log Entries ({displayClassList.length})</span>
           </button>
 
           <button
@@ -1485,23 +2002,44 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
           {/* Enhanced Subject & Timeframe Filter Controls */}
           <div className="bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-4 print:hidden">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-              {/* Subject Selection */}
-              <div className="flex items-center space-x-3 flex-1">
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider whitespace-nowrap">
-                  Select Subject:
-                </span>
-                <select
-                  value={filterSubject}
-                  onChange={(e) => setFilterSubject(e.target.value)}
-                  className="w-full max-w-xs bg-slate-800 border border-slate-700 text-white text-xs font-semibold rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
-                >
-                  <option value="All">All Subjects ({diaryEntries.length} Classes Logged)</option>
-                  {availableSubjects.map((s) => (
-                    <option key={s.code} value={s.code}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
+              {/* Subject Selection & Status Filter */}
+              <div className="flex flex-wrap items-center gap-3 flex-1">
+                <div className="flex items-center space-x-2 flex-1 min-w-[200px] max-w-xs">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider whitespace-nowrap">
+                    Subject:
+                  </span>
+                  <select
+                    value={filterSubject}
+                    onChange={(e) => setFilterSubject(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 text-white text-xs font-semibold rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                  >
+                    <option value="All">All Subjects ({diaryEntries.length} Classes Logged)</option>
+                    {availableSubjects.map((s) => (
+                      <option key={s.code} value={s.code}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Class Status Filter Dropdown */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wider whitespace-nowrap">
+                    Status:
+                  </span>
+                  <select
+                    id="class-status-filter"
+                    value={classStatusFilter}
+                    onChange={(e) => setClassStatusFilter(e.target.value as 'all' | 'pending' | 'taken' | 'conducted' | 'cancelled')}
+                    className="bg-slate-800 border border-slate-700 text-white text-xs font-semibold rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                    aria-label="Filter classes by status"
+                  >
+                    <option value="all">Show All Classes ({filteredDiaryEntries.length + filteredPendingClasses.length})</option>
+                    <option value="conducted">Classes Conducted ({filteredStats.conductedClasses})</option>
+                    <option value="cancelled">Classes Cancelled / Holidays ({filteredStats.cancelledClasses})</option>
+                    <option value="pending">Pending Classes ({filteredPendingClasses.length})</option>
+                  </select>
+                </div>
               </div>
 
               {/* Timeframe Presets */}
@@ -1577,10 +2115,11 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                     className="bg-slate-800 border border-slate-700 text-white text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-blue-500"
                   />
                 </div>
-                {(startDate || endDate || filterSubject !== 'All' || searchTerm) && (
+                {(startDate || endDate || filterSubject !== 'All' || searchTerm || classStatusFilter !== 'all') && (
                   <button
                     onClick={() => {
                       setFilterSubject('All');
+                      setClassStatusFilter('all');
                       handleSelectTimePreset('aug_oct_2026');
                       setSearchTerm('');
                     }}
@@ -1607,16 +2146,21 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
           {/* Cards List */}
           <div className="grid grid-cols-1 gap-4 print:hidden">
-            {filteredDiaryEntries.length === 0 ? (
+            {displayClassList.length === 0 ? (
               <div className="bg-slate-900 border border-slate-800 rounded-3xl p-12 text-center">
                 <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                <h4 className="text-base font-bold text-white">No Class Entries Found</h4>
+                <h4 className="text-base font-bold text-white">No Classes Found</h4>
                 <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                  No classes match the selected subject ({selectedSubjectLabel}) and time frame ({timeFrameLabel}). Try selecting a broader time frame or click "Reset Filters".
+                  {classStatusFilter === 'pending'
+                    ? `No pending classes found for ${selectedSubjectLabel} (${timeFrameLabel}). All scheduled classes have been logged!`
+                    : classStatusFilter === 'taken'
+                    ? `No classes already taken found for ${selectedSubjectLabel} (${timeFrameLabel}).`
+                    : `No classes match the selected subject (${selectedSubjectLabel}) and time frame (${timeFrameLabel}). Try selecting a broader time frame or click "Reset Filters".`}
                 </p>
                 <button
                   onClick={() => {
                     setFilterSubject('All');
+                    setClassStatusFilter('all');
                     handleSelectTimePreset('all');
                     setSearchTerm('');
                   }}
@@ -1626,8 +2170,197 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                 </button>
               </div>
             ) : (
-              filteredDiaryEntries.map((entry) => {
+              displayClassList.map((item) => {
+                if (item.isPending) {
+                  return (
+                    <div
+                      key={item.id}
+                      className="p-5 rounded-3xl border bg-slate-900/90 border-amber-500/30 ring-1 ring-amber-500/20 hover:border-amber-500/50 transition-all"
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center font-bold text-amber-300 text-xs">
+                            {item.subjectCode || 'CLS'}
+                          </div>
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <h4 className="font-extrabold text-sm text-white">
+                                {item.subjectName}
+                              </h4>
+                              <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700 font-mono">
+                                {item.batch}
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                              <span className="font-semibold text-slate-200">
+                                📅 {item.date} ({getDayOfWeek(item.date)})
+                              </span>
+                              <span>⏰ {item.startTime} - {item.endTime} ({item.durationMins || 60} mins)</span>
+                              <span className="text-amber-400 font-semibold">📍 Room No. {item.room}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Status & Actions */}
+                        <div className="flex items-center space-x-2">
+                          <div className="px-3 py-1 rounded-full text-[11px] font-bold border bg-amber-500/10 text-amber-300 border-amber-500/30 flex items-center space-x-1.5 mr-1">
+                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Pending Class Log</span>
+                          </div>
+
+                          <button
+                            onClick={() => handleOpenModalForPending(item, 'Cancelled')}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-500/20 text-rose-300 hover:text-rose-200 border border-slate-700 hover:border-rose-500/40 text-xs font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                            title="Mark as Cancelled, Holiday, or Faculty Leave"
+                          >
+                            <CalendarOff className="w-3.5 h-3.5 text-rose-400" />
+                            <span>Mark Cancelled / Holiday</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenModalForPending(item, 'Conducted')}
+                            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-extrabold shadow-md shadow-blue-600/20 flex items-center space-x-1.5 transition-all cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-white" />
+                            <span>Log Conducted</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-400">
+                        <div className="flex items-center space-x-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Scheduled routine class awaiting lecture topics or cancellation reason.</span>
+                        </div>
+                        <div className="flex items-center space-x-3 text-xs">
+                          <button
+                            onClick={() => handleOpenModalForPending(item, 'Cancelled')}
+                            className="text-rose-400 hover:text-rose-300 font-semibold underline cursor-pointer"
+                          >
+                            Mark as Cancelled →
+                          </button>
+                          <button
+                            onClick={() => handleOpenModalForPending(item, 'Conducted')}
+                            className="text-blue-400 hover:text-blue-300 font-semibold underline cursor-pointer"
+                          >
+                            Log Conducted Class →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const entry = item as ClassDiaryEntry;
                 const lockInfo = getLockCountdown(entry);
+                const isCancelled = entry.isCancelled || entry.status === 'Cancelled';
+
+                if (isCancelled) {
+                  return (
+                    <div
+                      key={entry.id}
+                      className={`p-5 rounded-3xl border transition-all ${
+                        lockInfo.isLocked
+                          ? 'bg-slate-900/90 border-slate-800'
+                          : 'bg-slate-900 border-rose-500/30 ring-1 ring-rose-500/20'
+                      }`}
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center font-bold text-rose-300 text-xs">
+                            <CalendarOff className="w-5 h-5 text-rose-400" />
+                          </div>
+                          <div>
+                            <div className="flex items-center space-x-2">
+                              <h4 className="font-extrabold text-sm text-white">
+                                {entry.subjectName}
+                              </h4>
+                              <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700 font-mono">
+                                {entry.batch}
+                              </span>
+                              <span className="text-[10px] bg-rose-500/10 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full font-bold flex items-center space-x-1">
+                                <Ban className="w-3 h-3 text-rose-400" />
+                                <span>Class Cancelled / Holiday</span>
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                              <span className="font-semibold text-slate-200">
+                                📅 {entry.date} ({getDayOfWeek(entry.date)})
+                              </span>
+                              <span>⏰ {entry.startTime} - {entry.endTime} ({entry.durationMins || 60} mins)</span>
+                              <span className="text-rose-400 font-semibold">📍 Room No. {entry.room}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Lock Status Badge & Actions */}
+                        <div className="flex items-center space-x-3">
+                          <div
+                            className={`px-3 py-1 rounded-full text-[11px] font-bold border flex items-center space-x-1.5 ${
+                              lockInfo.isLocked
+                                ? 'bg-slate-800 text-slate-400 border-slate-700'
+                                : 'bg-rose-500/10 text-rose-300 border-rose-500/30'
+                            }`}
+                          >
+                            {lockInfo.isLocked ? (
+                              <>
+                                <Lock className="w-3.5 h-3.5" />
+                                <span>Locked (24h Expired)</span>
+                              </>
+                            ) : (
+                              <>
+                                <Unlock className="w-3.5 h-3.5 text-rose-400" />
+                                <span>{lockInfo.text}</span>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="flex items-center space-x-1.5">
+                            {!lockInfo.isLocked && (
+                              <button
+                                onClick={() => handleOpenModal(entry, 'Cancelled')}
+                                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 text-xs font-bold transition-colors flex items-center space-x-1.5"
+                                title="Edit Cancellation Reason"
+                              >
+                                <Edit2 className="w-3.5 h-3.5 text-rose-400" />
+                                <span>Edit Reason</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Reason for Cancellation Details */}
+                      <div className="pt-4 space-y-3">
+                        <div className="p-3.5 rounded-2xl bg-rose-500/5 border border-rose-500/20 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-rose-400 text-[10px] uppercase font-bold tracking-wider flex items-center space-x-1.5">
+                              <Info className="w-3.5 h-3.5 text-rose-400" />
+                              <span>Reason for Not Taking Class</span>
+                            </span>
+                            {entry.cancellationCategory && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                {entry.cancellationCategory}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-rose-100 font-semibold text-sm">
+                            {entry.cancellationReason || entry.topicTaught || 'Class not conducted as per routine schedule.'}
+                          </p>
+                        </div>
+
+                        {entry.remarks && (
+                          <div className="text-xs text-slate-300 bg-slate-950/60 p-3 rounded-xl border border-slate-800 italic">
+                            <span className="text-[10px] uppercase text-slate-500 block not-italic font-bold mb-0.5">
+                              Faculty Remarks:
+                            </span>
+                            "{entry.remarks}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
                   <div
@@ -1650,6 +2383,9 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                             </h4>
                             <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700 font-mono">
                               {entry.batch}
+                            </span>
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
+                              Class Taken
                             </span>
                           </div>
                           <div className="text-xs text-slate-400 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
@@ -1686,7 +2422,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
                         <div className="flex items-center space-x-1.5">
                           <button
-                            onClick={() => handleOpenModal(entry)}
+                            onClick={() => handleOpenModal(entry, 'Conducted')}
                             className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 text-xs font-bold transition-colors flex items-center space-x-1"
                             title="Update Attendance & Entry Details"
                           >
@@ -1695,7 +2431,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                           </button>
                           {!lockInfo.isLocked && (
                             <button
-                              onClick={() => handleOpenModal(entry)}
+                              onClick={() => handleOpenModal(entry, 'Conducted')}
                               className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700 transition-colors"
                               title="Edit Entry"
                             >
@@ -2050,13 +2786,60 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
             <div className="space-y-1">
               <h3 className="font-heading font-extrabold text-xl text-white flex items-center space-x-2">
-                <BookOpen className="w-5 h-5 text-blue-400" />
-                <span>{editingEntryId ? 'Edit Class Log Entry' : 'Log Conducted Class'}</span>
+                {formStatus === 'Cancelled' ? (
+                  <CalendarOff className="w-5 h-5 text-rose-400" />
+                ) : (
+                  <BookOpen className="w-5 h-5 text-blue-400" />
+                )}
+                <span>
+                  {editingEntryId
+                    ? formStatus === 'Cancelled'
+                      ? 'Edit Cancelled Class Record'
+                      : 'Edit Class Log Entry'
+                    : formStatus === 'Cancelled'
+                    ? 'Record Cancelled Class / Holiday'
+                    : 'Log Conducted Class'}
+                </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Log topics taught and student attendance.
+                {formStatus === 'Cancelled'
+                  ? 'Record reason for cancellation, faculty leave, exam duty, or institutional holiday.'
+                  : 'Log topics taught, mapped syllabus unit, and student attendance.'}
                 <span className="text-amber-400 ml-1">Must be saved within 24 hours of class time.</span>
               </p>
+            </div>
+
+            {/* Status Switcher: Conducted vs Cancelled */}
+            <div className="flex items-center p-1 bg-slate-800/90 rounded-2xl border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setFormStatus('Conducted')}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                  formStatus === 'Conducted'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>🟢 Class Conducted (Taken)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormStatus('Cancelled');
+                  if (!formCancellationCategory) {
+                    setFormCancellationCategory('🏛️ Institutional / Gazetted Holiday');
+                  }
+                }}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                  formStatus === 'Cancelled'
+                    ? 'bg-rose-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Ban className="w-3.5 h-3.5" />
+                <span>🔴 Class Cancelled / Holiday / Not Taken</span>
+              </button>
             </div>
 
             <form onSubmit={handleSaveEntry} className="space-y-4">
@@ -2120,7 +2903,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                           setFormSubjectName(selectedVal);
                         }
                       }}
-                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs font-semibold rounded-xl p-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
                       required
                     >
                       <option value="" disabled>-- Select Subject from Routine --</option>
@@ -2148,195 +2931,268 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Topic Taught *</label>
-                <textarea
-                  rows={2}
-                  placeholder="Describe the main topic, key concepts, or numerical problems solved..."
-                  value={formTopic}
-                  onChange={(e) => setFormTopic(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Mapped Syllabus Unit</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Unit 1: Core Concepts & Principles"
-                  value={formSyllabusUnit}
-                  onChange={(e) => setFormSyllabusUnit(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
-                />
-              </div>
-
-              {/* Student Attendance Marking Grid */}
-              <div className="space-y-2">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <label className="text-[10px] font-bold uppercase text-slate-400 block">
-                    Student Attendance ({formAttendance.filter(a => a.status === 'Present').length}/{formAttendance.length} Present)
-                  </label>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={handleImportRosterForCurrentClass}
-                      className="px-2.5 py-1 bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-lg text-[10px] font-bold flex items-center space-x-1 transition-all cursor-pointer"
-                    >
-                      <UserCheck className="w-3 h-3" />
-                      <span>Import Roster</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormAttendance(formAttendance.map(a => ({ ...a, status: 'Present' })));
+              {/* CANCELLED CLASS SPECIFIC FIELDS */}
+              {formStatus === 'Cancelled' ? (
+                <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 space-y-3.5">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-rose-300 block mb-1.5 flex items-center space-x-1">
+                      <Ban className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Category / Nature of Cancellation *</span>
+                    </label>
+                    <select
+                      value={formCancellationCategory}
+                      onChange={(e) => {
+                        const cat = e.target.value;
+                        setFormCancellationCategory(cat);
+                        const matchedCat = CANCELLATION_CATEGORIES.find((c) => c.label === cat);
+                        if (matchedCat && matchedCat.presetReason && !formCancellationReason) {
+                          setFormCancellationReason(matchedCat.presetReason);
+                        }
                       }}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700"
+                      className="w-full bg-slate-900 border border-rose-500/40 text-rose-100 text-xs font-semibold rounded-xl p-2.5 focus:outline-none focus:border-rose-400 cursor-pointer"
                     >
-                      All Present
-                    </button>
+                      {CANCELLATION_CATEGORIES.map((cat) => (
+                        <option key={cat.id} value={cat.label}>
+                          {cat.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFormAttendance(formAttendance.map(a => ({ ...a, status: 'Absent' })));
-                      }}
-                      className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700"
-                    >
-                      All Absent
-                    </button>
+                  {/* Quick Preset Reason Chips */}
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-400 block mb-1.5">
+                      Quick Fill Presets:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {COMMON_HOLIDAY_QUICK_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setFormCancellationReason(preset)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-rose-500/20 text-slate-300 hover:text-rose-200 border border-slate-700 hover:border-rose-500/40 text-[10px] font-medium transition-all cursor-pointer"
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-                    {formAttendance.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setFormAttendance([])}
-                        className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-bold rounded-lg border border-red-500/30"
-                      >
-                        Clear List
-                      </button>
-                    )}
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-rose-300 block mb-1">
+                      Detailed Reason / Explanation *
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="State the exact reason for cancellation (e.g. Independence Day, NAAC committee duty, Medical leave)..."
+                      value={formCancellationReason}
+                      onChange={(e) => setFormCancellationReason(e.target.value)}
+                      className="w-full bg-slate-900 border border-rose-500/30 text-rose-50 text-xs rounded-xl p-2.5 placeholder:text-slate-500 focus:outline-none focus:border-rose-400"
+                      required
+                    />
+                  </div>
+
+                  <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] text-slate-400 flex items-center space-x-2">
+                    <Info className="w-4 h-4 text-blue-400 shrink-0" />
+                    <span>
+                      Syllabus progress and student attendance rosters are exempted for cancelled classes and will not count against attendance percentages.
+                    </span>
                   </div>
                 </div>
+              ) : (
+                /* CONDUCTED CLASS SPECIFIC FIELDS */
+                <>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Topic Taught *</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Describe the main topic, key concepts, or numerical problems solved..."
+                      value={formTopic}
+                      onChange={(e) => setFormTopic(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
+                      required
+                    />
+                  </div>
 
-                {/* Add Custom Student to List */}
-                <div className="flex items-center space-x-2 bg-slate-800/60 p-2 rounded-xl border border-slate-700">
-                  <input
-                    type="text"
-                    placeholder="Roll No (e.g. COM-01)"
-                    value={manualRollNo}
-                    onChange={(e) => setManualRollNo(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-white text-[11px] rounded-lg px-2.5 py-1 w-28 focus:outline-none focus:border-blue-500"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Student Full Name"
-                    value={manualStudentName}
-                    onChange={(e) => setManualStudentName(e.target.value)}
-                    className="bg-slate-900 border border-slate-700 text-white text-[11px] rounded-lg px-2.5 py-1 flex-1 focus:outline-none focus:border-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!manualRollNo.trim() || !manualStudentName.trim()) {
-                        alert('Please provide both roll number and student name.');
-                        return;
-                      }
-                      const newStud: AttendanceRecord = {
-                        studentId: `cust_${Date.now()}`,
-                        rollNo: manualRollNo.trim(),
-                        name: manualStudentName.trim(),
-                        status: 'Present',
-                        remarks: '',
-                      };
-                      setFormAttendance((prev) => [...prev, newStud]);
-                      setManualRollNo('');
-                      setManualStudentName('');
-                    }}
-                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded-lg transition-all flex items-center space-x-1"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Add Student</span>
-                  </button>
-                </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Mapped Syllabus Unit</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Unit 1: Core Concepts & Principles"
+                      value={formSyllabusUnit}
+                      onChange={(e) => setFormSyllabusUnit(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
+                    />
+                  </div>
 
-                <div className="max-h-48 overflow-y-auto bg-slate-800/80 rounded-xl p-2 border border-slate-700 space-y-1.5">
-                  {formAttendance.length === 0 ? (
-                    <div className="p-4 text-center text-xs text-slate-400">
-                      No attendance records loaded. Teachers can click <span className="text-emerald-400 font-bold">Import Roster</span> or add individual students above.
-                    </div>
-                  ) : (
-                    formAttendance.map((st, idx) => (
-                      <div key={st.studentId || idx} className="flex flex-col sm:flex-row sm:items-center justify-between text-xs p-2 bg-slate-900/60 hover:bg-slate-700/50 rounded-lg gap-2 border border-slate-800">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-mono text-emerald-400 font-bold">{st.rollNo}</span>
-                          <span className="font-bold text-white">{st.name}</span>
-                        </div>
+                  {/* Student Attendance Marking Grid */}
+                  <div className="space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-[10px] font-bold uppercase text-slate-400 block">
+                        Student Attendance ({formAttendance.filter(a => a.status === 'Present').length}/{formAttendance.length} Present)
+                      </label>
 
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="text"
-                            placeholder="Remarks"
-                            value={st.remarks || ''}
-                            onChange={(e) => {
-                              const updated = [...formAttendance];
-                              updated[idx].remarks = e.target.value;
-                              setFormAttendance(updated);
-                            }}
-                            className="bg-slate-800 border border-slate-700 text-[10px] text-slate-200 rounded px-2 py-1 focus:outline-none w-24"
-                          />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleImportRosterForCurrentClass}
+                          className="px-2.5 py-1 bg-emerald-600/30 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white rounded-lg text-[10px] font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                        >
+                          <UserCheck className="w-3 h-3" />
+                          <span>Import Roster</span>
+                        </button>
 
-                          <div className="flex items-center space-x-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = [...formAttendance];
-                                updated[idx].status = 'Present';
-                                setFormAttendance(updated);
-                              }}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                st.status === 'Present' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              Present
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = [...formAttendance];
-                                updated[idx].status = 'Absent';
-                                setFormAttendance(updated);
-                              }}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                st.status === 'Absent' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              Absent
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFormAttendance((prev) => prev.filter((_, i) => i !== idx));
-                              }}
-                              className="p-1 text-slate-500 hover:text-red-400 rounded transition-all"
-                              title="Remove Student"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormAttendance(formAttendance.map(a => ({ ...a, status: 'Present' })));
+                          }}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700"
+                        >
+                          All Present
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormAttendance(formAttendance.map(a => ({ ...a, status: 'Absent' })));
+                          }}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold rounded-lg border border-slate-700"
+                        >
+                          All Absent
+                        </button>
+
+                        {formAttendance.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setFormAttendance([])}
+                            className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-bold rounded-lg border border-red-500/30"
+                          >
+                            Clear List
+                          </button>
+                        )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
+                    </div>
+
+                    {/* Add Custom Student to List */}
+                    <div className="flex items-center space-x-2 bg-slate-800/60 p-2 rounded-xl border border-slate-700">
+                      <input
+                        type="text"
+                        placeholder="Roll No (e.g. COM-01)"
+                        value={manualRollNo}
+                        onChange={(e) => setManualRollNo(e.target.value)}
+                        className="bg-slate-900 border border-slate-700 text-white text-[11px] rounded-lg px-2.5 py-1 w-28 focus:outline-none focus:border-blue-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Student Full Name"
+                        value={manualStudentName}
+                        onChange={(e) => setManualStudentName(e.target.value)}
+                        className="bg-slate-900 border border-slate-700 text-white text-[11px] rounded-lg px-2.5 py-1 flex-1 focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!manualRollNo.trim() || !manualStudentName.trim()) {
+                            alert('Please provide both roll number and student name.');
+                            return;
+                          }
+                          const newStud: AttendanceRecord = {
+                            studentId: `cust_${Date.now()}`,
+                            rollNo: manualRollNo.trim(),
+                            name: manualStudentName.trim(),
+                            status: 'Present',
+                            remarks: '',
+                          };
+                          setFormAttendance((prev) => [...prev, newStud]);
+                          setManualRollNo('');
+                          setManualStudentName('');
+                        }}
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold rounded-lg transition-all flex items-center space-x-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Add Student</span>
+                      </button>
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto bg-slate-800/80 rounded-xl p-2 border border-slate-700 space-y-1.5">
+                      {formAttendance.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-slate-400">
+                          No attendance records loaded. Teachers can click <span className="text-emerald-400 font-bold">Import Roster</span> or add individual students above.
+                        </div>
+                      ) : (
+                        formAttendance.map((st, idx) => (
+                          <div key={st.studentId || idx} className="flex flex-col sm:flex-row sm:items-center justify-between text-xs p-2 bg-slate-900/60 hover:bg-slate-700/50 rounded-lg gap-2 border border-slate-800">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-mono text-emerald-400 font-bold">{st.rollNo}</span>
+                              <span className="font-bold text-white">{st.name}</span>
+                            </div>
+
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="text"
+                                placeholder="Remarks"
+                                value={st.remarks || ''}
+                                onChange={(e) => {
+                                  const updated = [...formAttendance];
+                                  updated[idx].remarks = e.target.value;
+                                  setFormAttendance(updated);
+                                }}
+                                className="bg-slate-800 border border-slate-700 text-[10px] text-slate-200 rounded px-2 py-1 focus:outline-none w-24"
+                              />
+
+                              <div className="flex items-center space-x-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = [...formAttendance];
+                                    updated[idx].status = 'Present';
+                                    setFormAttendance(updated);
+                                  }}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                    st.status === 'Present' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  Present
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = [...formAttendance];
+                                    updated[idx].status = 'Absent';
+                                    setFormAttendance(updated);
+                                  }}
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                    st.status === 'Absent' ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  Absent
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormAttendance((prev) => prev.filter((_, i) => i !== idx));
+                                  }}
+                                  className="p-1 text-slate-500 hover:text-red-400 rounded transition-all"
+                                  title="Remove Student"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Remarks / Class Notes</label>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Remarks / Faculty Notes</label>
                 <input
                   type="text"
-                  placeholder="e.g. All students completed task; assignment assigned for next class."
+                  placeholder="e.g. Additional remarks, compensatory class notes, or assignment info..."
                   value={formRemarks}
                   onChange={(e) => setFormRemarks(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5"
@@ -2353,9 +3209,135 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-xs rounded-xl shadow-lg"
+                  className={`px-5 py-2 font-bold text-xs rounded-xl shadow-lg transition-all ${
+                    formStatus === 'Cancelled'
+                      ? 'bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white shadow-rose-600/20'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-600/20'
+                  }`}
                 >
-                  Save Class Record
+                  {formStatus === 'Cancelled' ? 'Save Cancelled Class Record' : 'Save Class Record'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* BULK CANCEL DAY / HOLIDAY MODAL */}
+      {isBulkCancelOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-3xl max-w-lg w-full p-6 space-y-5 text-white my-8 relative shadow-2xl">
+            <button
+              onClick={() => setIsBulkCancelOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-xl hover:bg-slate-800 transition-all"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="space-y-1">
+              <h3 className="font-heading font-extrabold text-xl text-white flex items-center space-x-2">
+                <CalendarOff className="w-6 h-6 text-rose-400" />
+                <span>Mark Holiday / Cancel Day</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Mark all your scheduled routine classes on a specific date as Cancelled / Holiday with a single click.
+              </p>
+            </div>
+
+            <form onSubmit={handleBulkCancelDate} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Select Date *
+                </label>
+                <input
+                  type="date"
+                  value={bulkCancelDate}
+                  onChange={(e) => setBulkCancelDate(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-rose-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Cancellation Reason Category *
+                </label>
+                <select
+                  value={bulkCancelCategory}
+                  onChange={(e) => {
+                    const cat = e.target.value;
+                    setBulkCancelCategory(cat);
+                    const matchedCat = CANCELLATION_CATEGORIES.find((c) => c.label === cat);
+                    if (matchedCat && matchedCat.presetReason) {
+                      setBulkCancelReason(matchedCat.presetReason);
+                    }
+                  }}
+                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs font-semibold rounded-xl p-2.5 focus:outline-none focus:border-rose-500 cursor-pointer"
+                >
+                  {CANCELLATION_CATEGORIES.map((cat) => (
+                    <option key={cat.id} value={cat.label}>
+                      {cat.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Quick Preset Reason Chips */}
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 block mb-1.5">
+                  Common Presets:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {COMMON_HOLIDAY_QUICK_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setBulkCancelReason(preset)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-200 border border-slate-700 hover:border-rose-500/40 text-[10px] font-medium transition-all cursor-pointer"
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                  Specific Reason / Event Description *
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Independence Day, State Gazetted Holiday, University Exam Invigilation..."
+                  value={bulkCancelReason}
+                  onChange={(e) => setBulkCancelReason(e.target.value)}
+                  className="w-full bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-rose-500"
+                  required
+                />
+              </div>
+
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-xs text-rose-200 space-y-1">
+                <div className="font-bold flex items-center space-x-1.5 text-rose-300">
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>Bulk Action Summary</span>
+                </div>
+                <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                  All routine periods scheduled on <span className="font-bold underline">{bulkCancelDate}</span> under your profile will be recorded as Cancelled with the reason above.
+                </p>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkCancelOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-600/20 cursor-pointer"
+                >
+                  Apply & Mark Cancelled
                 </button>
               </div>
             </form>
