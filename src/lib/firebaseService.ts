@@ -1012,6 +1012,26 @@ export function subscribeToRoomsRealtime(
 // ==========================================
 
 /**
+ * Helper to recursively sanitize objects for Firestore (removes undefined fields)
+ */
+function sanitizeForFirestore(obj: any): any {
+  if (obj === null || obj === undefined) return null;
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeForFirestore);
+  }
+  if (typeof obj === 'object' && !(obj instanceof Date)) {
+    const clean: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (val !== undefined) {
+        clean[key] = sanitizeForFirestore(val);
+      }
+    }
+    return clean;
+  }
+  return obj;
+}
+
+/**
  * Fetch all Class Diary entries directly from Firestore.
  */
 export async function getClassDiaryFromFirestore(): Promise<ClassDiaryEntry[]> {
@@ -1041,14 +1061,14 @@ export async function getClassDiaryFromFirestore(): Promise<ClassDiaryEntry[]> {
         syllabusUnit: data.syllabusUnit || '',
         durationMins: Number(data.durationMins) || 60,
         remarks: data.remarks || '',
-        attendance: data.attendance || [],
+        attendance: Array.isArray(data.attendance) ? data.attendance : [],
         status: data.status || (data.isCancelled ? 'Cancelled' : 'Conducted'),
         isCancelled: Boolean(data.isCancelled || data.status === 'Cancelled'),
         cancellationCategory: data.cancellationCategory || '',
         cancellationReason: data.cancellationReason || '',
         timetableEntryId: data.timetableEntryId || '',
-        createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt || new Date().toISOString(),
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+        updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
         isSynced: true,
       });
     });
@@ -1096,14 +1116,14 @@ export function subscribeToClassDiaryRealtime(
           syllabusUnit: data.syllabusUnit || '',
           durationMins: Number(data.durationMins) || 60,
           remarks: data.remarks || '',
-          attendance: data.attendance || [],
+          attendance: Array.isArray(data.attendance) ? data.attendance : [],
           status: data.status || (data.isCancelled ? 'Cancelled' : 'Conducted'),
           isCancelled: Boolean(data.isCancelled || data.status === 'Cancelled'),
           cancellationCategory: data.cancellationCategory || '',
           cancellationReason: data.cancellationReason || '',
           timetableEntryId: data.timetableEntryId || '',
-          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : data.createdAt || new Date().toISOString(),
-          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : data.updatedAt || new Date().toISOString(),
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : (data.createdAt || new Date().toISOString()),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate().toISOString() : (data.updatedAt || new Date().toISOString()),
           isSynced: true,
         });
       });
@@ -1123,30 +1143,66 @@ export function subscribeToClassDiaryRealtime(
 export async function saveClassDiaryToFirestore(entry: ClassDiaryEntry): Promise<{ success: boolean; message: string }> {
   try {
     const docRef = doc(db, 'classDiary', entry.id);
-    const existingSnap = await getDoc(docRef);
+    let existingData: any = null;
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        existingData = existingSnap.data();
+        const createdAtMs = existingData.createdAt?.toMillis ? existingData.createdAt.toMillis() : new Date(existingData.createdAt || Date.now()).getTime();
+        const elapsedHours = (Date.now() - createdAtMs) / (1000 * 60 * 60);
 
-    if (existingSnap.exists()) {
-      const data = existingSnap.data();
-      const createdAtMs = data.createdAt?.toMillis ? data.createdAt.toMillis() : new Date(data.createdAt || Date.now()).getTime();
-      const elapsedHours = (Date.now() - createdAtMs) / (1000 * 60 * 60);
-
-      if (elapsedHours > 24) {
-        return {
-          success: false,
-          message: 'Entry locked: 24-hour edit period has expired. Only Academic Coordinator can modify locked diary entries for compliance.',
-        };
+        if (elapsedHours > 24) {
+          return {
+            success: false,
+            message: 'Entry locked: 24-hour edit period has expired. Only Academic Coordinator can modify locked diary entries for compliance.',
+          };
+        }
       }
+    } catch (readErr) {
+      console.warn('Could not read existing diary doc for lock check, proceeding with save:', readErr);
     }
 
-    const payload: any = {
-      ...entry,
+    const rawPayload = {
+      id: entry.id,
+      facultyId: entry.facultyId || '',
+      facultyName: entry.facultyName || '',
+      facultyEmail: entry.facultyEmail || '',
+      facultyPhone: entry.facultyPhone || '',
+      department: entry.department || 'Commerce',
+      timetableEntryId: entry.timetableEntryId || '',
+      date: entry.date,
+      startTime: entry.startTime,
+      endTime: entry.endTime,
+      classStartTimestamp: entry.classStartTimestamp || Date.now(),
+      subjectCode: entry.subjectCode || '',
+      subjectName: entry.subjectName || '',
+      batch: entry.batch || entry.classBatch || '',
+      classBatch: entry.batch || entry.classBatch || '',
+      room: entry.room || '',
+      topicTaught: entry.topicTaught || '',
+      syllabusUnit: entry.syllabusUnit || '',
+      durationMins: Number(entry.durationMins) || 60,
+      remarks: entry.remarks || '',
+      attendance: Array.isArray(entry.attendance) ? entry.attendance.map((a) => ({
+        studentId: a.studentId || '',
+        rollNo: a.rollNo || '',
+        name: a.name || '',
+        status: a.status || 'Present',
+        remarks: a.remarks || '',
+      })) : [],
+      status: entry.status || (entry.isCancelled ? 'Cancelled' : 'Conducted'),
+      isCancelled: Boolean(entry.isCancelled || entry.status === 'Cancelled'),
+      cancellationCategory: entry.cancellationCategory || '',
+      cancellationReason: entry.cancellationReason || '',
+      createdAt: existingData?.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),
-      createdAt: existingSnap.exists() ? existingSnap.data().createdAt || serverTimestamp() : serverTimestamp(),
     };
 
-    await setDoc(docRef, payload, { merge: true });
+    const sanitizedPayload = sanitizeForFirestore(rawPayload);
 
-    return { success: true, message: 'Class diary entry saved and synchronized successfully.' };
+    await setDoc(docRef, sanitizedPayload, { merge: true });
+
+    return { success: true, message: 'Class diary entry saved and synchronized successfully to Cloud Firestore.' };
   } catch (error: any) {
     console.error('Error saving class diary to Firestore:', error);
     return {

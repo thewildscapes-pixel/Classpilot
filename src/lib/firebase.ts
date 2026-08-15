@@ -14,6 +14,8 @@ import {
   getFirestore,
   initializeFirestore,
   memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   doc,
   setDoc,
   getDoc,
@@ -56,7 +58,7 @@ const firebaseConfig = {
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with default or custom database ID and memoryLocalCache
+// Initialize Firestore with custom database ID, ignoreUndefinedProperties, and resilient cache
 const targetDbId = firebaseConfig.firestoreDatabaseId || '(default)';
 
 let firestoreInstance;
@@ -64,15 +66,29 @@ try {
   firestoreInstance = initializeFirestore(
     app,
     {
-      localCache: memoryLocalCache(),
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager(),
+      }),
+      ignoreUndefinedProperties: true,
     },
     targetDbId
   );
-} catch (e) {
+} catch (e1) {
   try {
-    firestoreInstance = getFirestore(app, targetDbId);
+    firestoreInstance = initializeFirestore(
+      app,
+      {
+        localCache: memoryLocalCache(),
+        ignoreUndefinedProperties: true,
+      },
+      targetDbId
+    );
   } catch (e2) {
-    firestoreInstance = getFirestore(app);
+    try {
+      firestoreInstance = getFirestore(app, targetDbId);
+    } catch (e3) {
+      firestoreInstance = getFirestore(app);
+    }
   }
 }
 

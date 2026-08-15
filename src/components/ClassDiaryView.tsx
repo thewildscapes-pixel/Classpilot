@@ -97,17 +97,9 @@ export const COMMON_HOLIDAY_QUICK_PRESETS = [
 
 const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [];
 
-const isExcludedSubject = (name?: string, code?: string): boolean => {
-  const text = `${name || ''} ${code || ''}`.toLowerCase().replace(/[^a-z0-9]/g, ' ');
-  return (
-    text.includes('financial account') ||
-    text.includes('organisation behav') ||
-    text.includes('organization behav') ||
-    text.includes('organisational behav') ||
-    text.includes('organizational behav') ||
-    text.includes('business organis') ||
-    text.includes('business organiz')
-  );
+// Ensure all academic subjects (including Commerce, Accounts, Management, etc.) are fully supported
+const isExcludedSubject = (_name?: string, _code?: string): boolean => {
+  return false;
 };
 
 export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
@@ -240,6 +232,8 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const [endDate, setEndDate] = useState<string>('2026-10-31');
   const [timePreset, setTimePreset] = useState<string>('aug_oct_2026');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncStatusText, setSyncStatusText] = useState<string>('');
   const [offlineDrafts, setOfflineDrafts] = useState<ClassDiaryEntry[]>([]);
   const [classStatusFilter, setClassStatusFilter] = useState<'all' | 'pending' | 'taken' | 'conducted' | 'cancelled'>('all');
 
@@ -567,65 +561,67 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     console.groupEnd();
   }, [currentUser, timetable, diaryEntries, filteredDiaryEntries, matchedFacultyProfile]);
 
-  // Helper function to safely merge incoming diary entries into state and localStorage with slot deduplication
+  // Helper function to safely merge incoming diary entries into state and localStorage with clean primary key preservation
   const mergeEntries = (existing: ClassDiaryEntry[], incoming: ClassDiaryEntry[]): ClassDiaryEntry[] => {
     const entryMap = new Map<string, ClassDiaryEntry>();
-    const slotSignatureMap = new Map<string, string>(); // signature -> id
 
-    const getSignature = (e: Partial<ClassDiaryEntry>) => {
-      const fac = (e.facultyName || e.facultyId || '').trim().toLowerCase();
-      const dt = (e.date || '').trim();
-      const st = (e.startTime || '').trim();
-      const sub = (e.subjectCode || e.subjectName || '').trim().toLowerCase();
-      if (!dt || !st) return null;
-      return `${fac}_${dt}_${st}_${sub}`;
-    };
-
-    const processItem = (e: ClassDiaryEntry) => {
-      if (!e || !e.id || isExcludedSubject(e.subjectName, e.subjectCode)) return;
-      const sig = getSignature(e);
-      let targetId = e.id;
-      if (sig && slotSignatureMap.has(sig)) {
-        targetId = slotSignatureMap.get(sig)!;
-      } else if (sig) {
-        slotSignatureMap.set(sig, targetId);
+    // Process existing items first
+    (existing || []).forEach((e) => {
+      if (e && e.id) {
+        entryMap.set(e.id, {
+          ...e,
+          batch: e.batch || e.classBatch || '',
+          classBatch: e.batch || e.classBatch || '',
+          room: e.room || 'Room C1',
+          department: e.department || 'Commerce',
+          durationMins: Number(e.durationMins) || 60,
+          attendance: Array.isArray(e.attendance) ? e.attendance : [],
+          status: e.status || (e.isCancelled ? 'Cancelled' : 'Conducted'),
+          isCancelled: Boolean(e.isCancelled || e.status === 'Cancelled'),
+        });
       }
+    });
 
-      const prev = entryMap.get(targetId);
-      const isCancelledVal = e.isCancelled !== undefined ? Boolean(e.isCancelled) : (e.status === 'Cancelled' ? true : (prev?.isCancelled || false));
-      const statusVal = e.status || (isCancelledVal ? 'Cancelled' : (prev?.status || 'Conducted'));
+    // Process incoming updates (overwrites and merges by exact ID)
+    (incoming || []).forEach((e) => {
+      if (e && e.id) {
+        const prev = entryMap.get(e.id);
+        const isCancelledVal = e.isCancelled !== undefined ? Boolean(e.isCancelled) : (e.status === 'Cancelled' ? true : (prev?.isCancelled || false));
+        const statusVal = e.status || (isCancelledVal ? 'Cancelled' : (prev?.status || 'Conducted'));
 
-      entryMap.set(targetId, {
-        ...prev,
-        ...e,
-        id: targetId,
-        batch: e.batch || (e as any).classBatch || prev?.batch || '',
-        topicTaught: e.topicTaught || prev?.topicTaught || '',
-        subjectCode: e.subjectCode || prev?.subjectCode || '',
-        subjectName: e.subjectName || prev?.subjectName || '',
-        room: e.room || prev?.room || 'LH-01',
-        department: e.department || prev?.department || 'Commerce',
-        syllabusUnit: e.syllabusUnit || prev?.syllabusUnit || '',
-        durationMins: e.durationMins || prev?.durationMins || 60,
-        remarks: e.remarks || prev?.remarks || '',
-        attendance: (e.attendance && e.attendance.length > 0) ? e.attendance : (prev?.attendance || []),
-        status: statusVal,
-        isCancelled: isCancelledVal,
-        cancellationCategory: e.cancellationCategory || prev?.cancellationCategory || '',
-        cancellationReason: e.cancellationReason || prev?.cancellationReason || '',
-      });
-    };
-
-    existing.forEach(processItem);
-    incoming.forEach(processItem);
+        entryMap.set(e.id, {
+          ...prev,
+          ...e,
+          id: e.id,
+          batch: e.batch || e.classBatch || prev?.batch || '',
+          classBatch: e.batch || e.classBatch || prev?.classBatch || '',
+          topicTaught: e.topicTaught || prev?.topicTaught || '',
+          subjectCode: e.subjectCode || prev?.subjectCode || '',
+          subjectName: e.subjectName || prev?.subjectName || '',
+          room: e.room || prev?.room || 'Room C1',
+          department: e.department || prev?.department || 'Commerce',
+          syllabusUnit: e.syllabusUnit || prev?.syllabusUnit || '',
+          durationMins: Number(e.durationMins) || prev?.durationMins || 60,
+          remarks: e.remarks !== undefined ? e.remarks : (prev?.remarks || ''),
+          attendance: (e.attendance && Array.isArray(e.attendance) && e.attendance.length > 0) ? e.attendance : (prev?.attendance || []),
+          status: statusVal,
+          isCancelled: isCancelledVal,
+          cancellationCategory: e.cancellationCategory || prev?.cancellationCategory || '',
+          cancellationReason: e.cancellationReason || prev?.cancellationReason || '',
+          isSynced: e.isSynced !== undefined ? e.isSynced : true,
+        });
+      }
+    });
 
     const merged = Array.from(entryMap.values()).sort(
-      (a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime()
+      (a, b) => new Date(b.date || b.createdAt).getTime() - new Date(a.date || a.createdAt).getTime()
     );
+
     try {
       localStorage.setItem('classpilot_class_diary', JSON.stringify(merged));
       localStorage.setItem('lecturapulse_class_diary', JSON.stringify(merged));
-    } catch (e) {}
+    } catch (err) {}
+
     return merged;
   };
 
@@ -707,8 +703,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       currentUser.role === 'admin',
       (entries) => {
         if (entries && entries.length > 0) {
-          const nonExcluded = entries.filter((e) => !isExcludedSubject(e.subjectName, e.subjectCode));
-          setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
+          setDiaryEntries((prev) => mergeEntries(prev, entries));
         }
       }
     );
@@ -719,13 +714,17 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
     return () => unsubscribe();
   }, [currentUser.id, currentUser.facultyId, currentUser.role]);
 
-  const fetchDiaryEntries = async () => {
+  const fetchDiaryEntries = async (isManual = false) => {
+    setIsSyncing(true);
+    if (isManual) setSyncStatusText('Connecting to Cloud Firestore...');
+
+    let cloudCount = 0;
     // 1. Fetch from Firestore (primary multi-device real-time store)
     try {
       const fsDiary = await getClassDiaryFromFirestore();
       if (Array.isArray(fsDiary) && fsDiary.length > 0) {
-        const nonExcluded = fsDiary.filter((e) => !isExcludedSubject(e.subjectName, e.subjectCode));
-        setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
+        cloudCount = fsDiary.length;
+        setDiaryEntries((prev) => mergeEntries(prev, fsDiary));
       }
     } catch (fsErr) {
       console.warn('Class diary Firestore initial fetch error:', fsErr);
@@ -743,8 +742,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data) && data.length > 0) {
-          const nonExcluded = data.filter((e: any) => !isExcludedSubject(e.subjectName, e.subjectCode));
-          setDiaryEntries((prev) => mergeEntries(prev, nonExcluded));
+          setDiaryEntries((prev) => mergeEntries(prev, data));
         }
       }
     } catch (e) {
@@ -753,6 +751,12 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
     // 3. Fallback to local cache
     loadLocalDiaryEntries();
+
+    setIsSyncing(false);
+    if (isManual) {
+      setSyncStatusText(`Cloud Sync Complete: ${cloudCount > 0 ? `${cloudCount} entries synchronized` : 'All devices up to date'}`);
+      setTimeout(() => setSyncStatusText(''), 4000);
+    }
   };
 
   const loadLocalDiaryEntries = () => {
@@ -1916,14 +1920,26 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
             <button
               onClick={() => {
-                fetchDiaryEntries();
+                fetchDiaryEntries(true);
               }}
-              className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm"
+              disabled={isSyncing}
+              className={`px-3 py-1.5 border rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm ${
+                isSyncing
+                  ? 'bg-blue-600/30 border-blue-500/50 text-blue-200 animate-pulse cursor-wait'
+                  : 'bg-blue-500/10 hover:bg-blue-500/20 border-blue-500/30 text-blue-300 hover:text-white'
+              }`}
               title="Sync latest entries across tablet, mobile, and laptop"
             >
-              <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-              <span>Sync Cloud</span>
+              <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>{isSyncing ? 'Syncing Cloud...' : 'Sync Cloud'}</span>
             </button>
+
+            {syncStatusText && (
+              <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-[11px] font-bold animate-fade-in flex items-center space-x-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{syncStatusText}</span>
+              </span>
+            )}
 
             {offlineDrafts.length > 0 && (
               <button
