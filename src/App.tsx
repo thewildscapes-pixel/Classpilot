@@ -77,7 +77,6 @@ import { PublicStudentEnrollmentPage } from './components/PublicStudentEnrollmen
 import { ClassDiaryView } from './components/ClassDiaryView';
 import { GoogleCalendarView } from './components/GoogleCalendarView';
 import { ComplianceResearchView } from './components/ComplianceResearchView';
-import { DashboardAnalytics } from './components/DashboardAnalytics';
 import { AlarmModal } from './components/AlarmModal';
 import { SleepModeAlarmModal } from './components/SleepModeAlarmModal';
 import { sendLocalClassNotification } from './utils/calendarSyncUtils';
@@ -1608,15 +1607,6 @@ export default function App() {
 
       {/* Main Content Viewport */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Dashboard Analytics & Summary Header */}
-        {activeTab !== 'diary' && (
-          <DashboardAnalytics
-            currentUser={currentUser}
-            timetable={timetable}
-            onNavigateTab={setActiveTab}
-          />
-        )}
-
         {/* Top Countdown Widget */}
         <CountdownWidget
           entries={timetable}

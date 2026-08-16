@@ -97,9 +97,54 @@ export const COMMON_HOLIDAY_QUICK_PRESETS = [
 
 const DEFAULT_SYLLABUS_TOPICS: SyllabusTopic[] = [];
 
-// Ensure all academic subjects (including Commerce, Accounts, Management, etc.) are fully supported
-const isExcludedSubject = (_name?: string, _code?: string): boolean => {
-  return false;
+// Exclude Financial Accounting and Business Organisation by default from the class diary
+export const isExcludedSubject = (name?: string, code?: string): boolean => {
+  const normName = (name || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const normCode = (code || '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+  const combined = `${normName} ${normCode}`;
+
+  const isFinancialAccounting =
+    combined.includes('financial account') ||
+    combined.includes('financial acct') ||
+    combined.includes('fin account') ||
+    combined.includes('fin acct') ||
+    normCode === 'fa' ||
+    normName === 'fa' ||
+    normName === 'financial accounting' ||
+    normName === 'financial accountancy' ||
+    normName === 'financial accounts';
+
+  const isBusinessOrganisation =
+    combined.includes('business organis') ||
+    combined.includes('business organiz') ||
+    combined.includes('business org') ||
+    combined.includes('bus org') ||
+    normCode === 'bo' ||
+    normName === 'bo' ||
+    normName === 'business organisation' ||
+    normName === 'business organization' ||
+    normName === 'business organisation and management' ||
+    normName === 'business organization and management';
+
+  return isFinancialAccounting || isBusinessOrganisation;
+};
+
+// Calculate default dynamic range: recently concluded (past 4 days) and upcoming classes (next 7 days)
+export const getRecentAndUpcomingRange = () => {
+  const today = new Date();
+  const pastDays = 4;
+  const futureDays = 7;
+
+  const start = new Date(today);
+  start.setDate(today.getDate() - pastDays);
+
+  const end = new Date(today);
+  end.setDate(today.getDate() + futureDays);
+
+  return {
+    startDate: start.toISOString().split('T')[0],
+    endDate: end.toISOString().split('T')[0],
+  };
 };
 
 export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
@@ -228,9 +273,10 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
   const [syllabusTopics, setSyllabusTopics] = useState<SyllabusTopic[]>(DEFAULT_SYLLABUS_TOPICS);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [filterSubject, setFilterSubject] = useState<string>('All');
-  const [startDate, setStartDate] = useState<string>('2026-08-01');
-  const [endDate, setEndDate] = useState<string>('2026-10-31');
-  const [timePreset, setTimePreset] = useState<string>('aug_oct_2026');
+  const defaultRecentRange = useMemo(() => getRecentAndUpcomingRange(), []);
+  const [startDate, setStartDate] = useState<string>(() => getRecentAndUpcomingRange().startDate);
+  const [endDate, setEndDate] = useState<string>(() => getRecentAndUpcomingRange().endDate);
+  const [timePreset, setTimePreset] = useState<string>('recent_upcoming');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncStatusText, setSyncStatusText] = useState<string>('');
@@ -282,21 +328,32 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
   // Dynamic time frame display label
   const timeFrameLabel = useMemo(() => {
+    if (timePreset === 'recent_upcoming') return `Recent & Upcoming (${startDate} to ${endDate})`;
+    if (timePreset === 'today') return `Today (${startDate})`;
     if (!startDate && !endDate) return 'All Dates';
     if (startDate === '2026-08-01' && endDate === '2026-10-31') return 'Aug 2026 – Oct 2026';
     if (startDate === '2026-08-01' && endDate === '2026-08-31') return 'August 2026';
     if (startDate === '2026-07-01' && endDate === '2026-12-31') return 'Odd Sem 2026 (Jul–Dec)';
     if (startDate && endDate) {
+      if (startDate === endDate) return `Date: ${startDate}`;
       return `${startDate} to ${endDate}`;
     }
     if (startDate) return `From ${startDate}`;
     return `Up to ${endDate}`;
-  }, [startDate, endDate]);
+  }, [startDate, endDate, timePreset]);
 
   // Handle Preset Timeframes
   const handleSelectTimePreset = (preset: string) => {
     setTimePreset(preset);
-    if (preset === 'aug_oct_2026') {
+    if (preset === 'recent_upcoming') {
+      const range = getRecentAndUpcomingRange();
+      setStartDate(range.startDate);
+      setEndDate(range.endDate);
+    } else if (preset === 'today') {
+      const todayStr = new Date().toISOString().split('T')[0];
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (preset === 'aug_oct_2026') {
       setStartDate('2026-08-01');
       setEndDate('2026-10-31');
     } else if (preset === 'aug_2026') {
@@ -567,7 +624,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
     // Process existing items first
     (existing || []).forEach((e) => {
-      if (e && e.id) {
+      if (e && e.id && !isExcludedSubject(e.subjectName, e.subjectCode)) {
         entryMap.set(e.id, {
           ...e,
           batch: e.batch || e.classBatch || '',
@@ -584,7 +641,7 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
 
     // Process incoming updates (overwrites and merges by exact ID)
     (incoming || []).forEach((e) => {
-      if (e && e.id) {
+      if (e && e.id && !isExcludedSubject(e.subjectName, e.subjectCode)) {
         const prev = entryMap.get(e.id);
         const isCancelledVal = e.isCancelled !== undefined ? Boolean(e.isCancelled) : (e.status === 'Cancelled' ? true : (prev?.isCancelled || false));
         const statusVal = e.status || (isCancelledVal ? 'Cancelled' : (prev?.status || 'Conducted'));
@@ -693,6 +750,38 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
+  }, []);
+
+  // Proactive purge: permanently remove Financial Accounting and Business Organisation from Firestore, SQLite, and caches
+  useEffect(() => {
+    const purgeExcludedEntries = async () => {
+      try {
+        const allLocal = localStorage.getItem('classpilot_class_diary') || localStorage.getItem('lecturapulse_class_diary');
+        if (allLocal) {
+          const parsed = JSON.parse(allLocal);
+          if (Array.isArray(parsed)) {
+            const excludedEntries = parsed.filter((e) => isExcludedSubject(e.subjectName, e.subjectCode));
+            for (const item of excludedEntries) {
+              if (item.id) {
+                try {
+                  await deleteClassDiaryFromFirestore(item.id);
+                } catch (e) {}
+                try {
+                  await fetch(`/api/class-diary/${item.id}`, { method: 'DELETE' });
+                } catch (e) {}
+              }
+            }
+            const cleaned = parsed.filter((e) => !isExcludedSubject(e.subjectName, e.subjectCode));
+            localStorage.setItem('classpilot_class_diary', JSON.stringify(cleaned));
+            localStorage.setItem('lecturapulse_class_diary', JSON.stringify(cleaned));
+            setDiaryEntries((prev) => prev.filter((e) => !isExcludedSubject(e.subjectName, e.subjectCode)));
+          }
+        }
+      } catch (err) {
+        console.warn('Purge notice for excluded subjects:', err);
+      }
+    };
+    purgeExcludedEntries();
   }, []);
 
   // Fetch diary entries from backend, Firestore realtime, & offline storage
@@ -2107,6 +2196,27 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-xs font-bold text-slate-400 mr-1.5">Time Frame:</span>
                 <button
+                  onClick={() => handleSelectTimePreset('recent_upcoming')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-1.5 ${
+                    timePreset === 'recent_upcoming'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+                  }`}
+                  title="Default View: Shows recently concluded (past 4 days) & upcoming classes (next 7 days)"
+                >
+                  <span>⚡ Recent & Upcoming (Default)</span>
+                </button>
+                <button
+                  onClick={() => handleSelectTimePreset('today')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    timePreset === 'today'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700'
+                  }`}
+                >
+                  Today
+                </button>
+                <button
                   onClick={() => handleSelectTimePreset('aug_oct_2026')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                     timePreset === 'aug_oct_2026'
@@ -2181,12 +2291,12 @@ export const ClassDiaryView: React.FC<ClassDiaryViewProps> = ({
                     onClick={() => {
                       setFilterSubject('All');
                       setClassStatusFilter('all');
-                      handleSelectTimePreset('aug_oct_2026');
+                      handleSelectTimePreset('recent_upcoming');
                       setSearchTerm('');
                     }}
                     className="text-xs text-blue-400 hover:text-blue-300 underline cursor-pointer"
                   >
-                    Reset Filters
+                    Reset to Default (Recent & Upcoming)
                   </button>
                 )}
               </div>

@@ -351,6 +351,7 @@ async function initDatabase() {
     runSql("DELETE FROM faculty WHERE (id IN ('fac_2', 'fac_3') OR name LIKE '%test%' OR name LIKE '%faculty member%') AND email != 'thewildscapes@gmail.com'");
     runSql("DELETE FROM students WHERE id IN ('st_1', 'st_2', 'st_3', 'st_4', 'st_5', 'st_6', 'st_7', 'st_8') AND name IN ('Ananya Gogoi', 'Bishal Sonowal', 'Debashree Sharma', 'Hemanta Baruah', 'Jubin Saikia', 'Kavita Agarwal', 'Manash Protim Das', 'Nabanita Borgohain')");
     runSql("DELETE FROM rooms WHERE id IN ('rm_1', 'rm_2', 'rm_3', 'rm_4', 'rm_5') AND name LIKE 'Room No.%'");
+    runSql("DELETE FROM class_diary WHERE LOWER(subjectName) LIKE '%financial account%' OR LOWER(subjectName) LIKE '%business organis%' OR LOWER(subjectName) LIKE '%business organiz%' OR LOWER(subjectCode) LIKE '%financial account%' OR LOWER(subjectCode) LIKE '%business organis%' OR LOWER(subjectCode) LIKE '%business organiz%' OR LOWER(subjectName) LIKE '%fin account%' OR LOWER(subjectCode) = 'fa' OR LOWER(subjectCode) = 'bo'");
 
     // Ensure Dr. Deborshee Gogoi is correctly registered in the faculty table
     runSql(
@@ -1597,7 +1598,24 @@ async function startServer() {
     } else {
       rows = queryAll('SELECT * FROM class_diary ORDER BY date DESC, startTime DESC');
     }
-    const diaryEntries = rows.map((r: any) => {
+    const isExcluded = (name?: string, code?: string): boolean => {
+      const text = `${name || ''} ${code || ''}`.toLowerCase().replace(/[^a-z0-9]/g, ' ');
+      return (
+        text.includes('financial account') ||
+        text.includes('financial acct') ||
+        text.includes('fin account') ||
+        text.includes('fin acct') ||
+        text.includes('business organis') ||
+        text.includes('business organiz') ||
+        text.includes('business org') ||
+        text.trim() === 'fa' ||
+        text.trim() === 'bo'
+      );
+    };
+
+    const diaryEntries = rows
+      .filter((r: any) => !isExcluded(r.subjectName, r.subjectCode))
+      .map((r: any) => {
       let absentRollNumbers: string[] = [];
       try {
         if (typeof r.absentRollNumbers === 'string' && r.absentRollNumbers) {
