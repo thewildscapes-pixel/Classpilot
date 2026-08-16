@@ -2601,76 +2601,95 @@ export const AdminTimetable: React.FC<AdminTimetableProps> = ({
                                           </span>
                                           <RecentIndicatorBadge status={recentStatus} compact />
                                         </div>
-                                        <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[9px]">
-                                          {entry.room}
-                                        </span>
+                                        <div className="flex items-center space-x-1">
+                                          <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-bold text-[9px]">
+                                            {entry.room}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openEditModal(entry);
+                                            }}
+                                            className="px-1.5 py-0.5 rounded bg-indigo-600/90 hover:bg-indigo-500 text-white font-bold text-[9px] flex items-center space-x-0.5 transition cursor-pointer shadow-sm"
+                                            title="Edit Class Routine Entry"
+                                          >
+                                            <Edit2 className="w-2.5 h-2.5" />
+                                            <span>Edit</span>
+                                          </button>
+                                        </div>
                                       </div>
 
-                                    <div className="font-bold text-white text-xs leading-snug line-clamp-2">
-                                      {entry.subjectName}
-                                    </div>
+                                      <div className="font-bold text-white text-xs leading-snug line-clamp-2">
+                                        {entry.subjectName}
+                                      </div>
 
-                                    <div className="text-[10px] font-mono text-indigo-300 font-semibold mt-0.5">
-                                      {entry.subjectCode}
-                                    </div>
+                                      <div className="text-[10px] font-mono text-indigo-300 font-semibold mt-0.5">
+                                        {entry.subjectCode}
+                                      </div>
 
-                                    <div className="text-[10px] text-slate-300 mt-1 pt-1 border-t border-slate-800 flex flex-col space-y-0.5">
-                                      <span className="truncate font-medium">👤 {entry.facultyName}</span>
-                                      <span className="text-[9px] text-slate-400 truncate">🎓 {entry.batch}</span>
-                                    </div>
+                                      <div className="text-[10px] text-slate-300 mt-1 pt-1 border-t border-slate-800 flex flex-col space-y-0.5">
+                                        <span className="truncate font-medium">👤 {entry.facultyName}</span>
+                                        <span className="text-[9px] text-slate-400 truncate">🎓 {entry.batch}</span>
+                                      </div>
 
-                                    {showFirebaseSyncTimestamps && (
-                                      <div className="mt-1.5 pt-1 border-t border-amber-500/40 bg-amber-950/80 p-1.5 rounded-lg text-[9px] font-mono text-amber-300 flex flex-col space-y-1 shadow-sm">
-                                        <div className="flex items-center justify-between font-bold">
-                                          <span className="flex items-center space-x-1 text-amber-400">
-                                            <Database className="w-2.5 h-2.5" />
-                                            <span>FS Synced</span>
-                                          </span>
-                                          <span className="text-[8px] text-amber-300/70">{entry.id.substring(0, 10)}</span>
-                                        </div>
-                                        <div className="text-slate-100 font-semibold truncate">
-                                          🕒 {formatSyncTime(entry.updatedAt || entry.lastSyncedAt)}
-                                        </div>
+                                      {/* Quick Action Footer Buttons */}
+                                      <div className="mt-2 pt-1.5 border-t border-slate-800 flex items-center justify-between gap-1">
                                         <button
                                           type="button"
                                           onClick={(e) => {
                                             e.stopPropagation();
-                                            handleSingleEntryResync(entry);
+                                            openEditModal(entry);
                                           }}
-                                          disabled={syncingEntryIds[entry.id]}
-                                          className="w-full mt-0.5 py-1 px-1.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold rounded text-[9px] transition flex items-center justify-center space-x-1 shadow cursor-pointer disabled:opacity-50"
-                                          title="Force re-upload and update this entry in Firestore"
+                                          className="flex-1 py-1 px-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[10px] flex items-center justify-center space-x-1 shadow-sm transition-all cursor-pointer"
+                                          title="Edit class information, faculty, room or time"
                                         >
-                                          <RotateCcw className={`w-2.5 h-2.5 ${syncingEntryIds[entry.id] ? 'animate-spin' : ''}`} />
-                                          <span>{syncingEntryIds[entry.id] ? 'Syncing...' : 'Force Re-Sync'}</span>
+                                          <Edit2 className="w-3 h-3" />
+                                          <span>Edit Class</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (confirm(`Delete class "${entry.subjectName}" (${entry.day} ${entry.startTime}-${entry.endTime})?`)) {
+                                              onDeleteEntry(entry.id);
+                                            }
+                                          }}
+                                          className="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/30 text-rose-400 hover:text-rose-300 border border-rose-500/20 text-[10px] transition cursor-pointer"
+                                          title="Delete Class"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
                                         </button>
                                       </div>
-                                    )}
 
-                                    {/* Quick Actions Hover overlay */}
-                                    <div className="absolute inset-0 bg-slate-950/90 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2 p-1">
-                                      <button
-                                        onClick={() => openEditModal(entry)}
-                                        className="p-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 transition-all text-[10px] font-bold flex items-center space-x-1"
-                                        title="Edit Class"
-                                      >
-                                        <Edit2 className="w-3 h-3" />
-                                        <span>Edit</span>
-                                      </button>
-                                      <button
-                                        onClick={() => {
-                                          if (confirm(`Delete class "${entry.subjectName}"?`)) {
-                                            onDeleteEntry(entry.id);
-                                          }
-                                        }}
-                                        className="p-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-500 transition-all text-[10px] font-bold flex items-center space-x-1"
-                                        title="Delete Class"
-                                      >
-                                        <Trash2 className="w-3 h-3" />
-                                        <span>Delete</span>
-                                      </button>
+                                      {showFirebaseSyncTimestamps && (
+                                        <div className="mt-1.5 pt-1 border-t border-amber-500/40 bg-amber-950/80 p-1.5 rounded-lg text-[9px] font-mono text-amber-300 flex flex-col space-y-1 shadow-sm">
+                                          <div className="flex items-center justify-between font-bold">
+                                            <span className="flex items-center space-x-1 text-amber-400">
+                                              <Database className="w-2.5 h-2.5" />
+                                              <span>FS Synced</span>
+                                            </span>
+                                            <span className="text-[8px] text-amber-300/70">{entry.id.substring(0, 10)}</span>
+                                          </div>
+                                          <div className="text-slate-100 font-semibold truncate">
+                                            🕒 {formatSyncTime(entry.updatedAt || entry.lastSyncedAt)}
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleSingleEntryResync(entry);
+                                            }}
+                                            disabled={syncingEntryIds[entry.id]}
+                                            className="w-full mt-0.5 py-1 px-1.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold rounded text-[9px] transition flex items-center justify-center space-x-1 shadow cursor-pointer disabled:opacity-50"
+                                            title="Force re-upload and update this entry in Firestore"
+                                          >
+                                            <RotateCcw className={`w-2.5 h-2.5 ${syncingEntryIds[entry.id] ? 'animate-spin' : ''}`} />
+                                            <span>{syncingEntryIds[entry.id] ? 'Syncing...' : 'Force Re-Sync'}</span>
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
-                                  </div>
                                 );
                               })}
                               </div>
